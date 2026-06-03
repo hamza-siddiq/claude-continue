@@ -61,6 +61,5 @@ def keystroke_in_claude(*applescript_body: str) -> None:
 def open_settings_shortcut() -> None:
     """Open Claude Settings via ⌘, (works from home screen and chat)."""
     run_applescript(
-        "delay 0.15",
         'tell application "System Events" to keystroke "," using command down',
     )

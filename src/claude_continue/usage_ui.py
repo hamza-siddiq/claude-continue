@@ -14,7 +14,6 @@ from claude_continue.ax import (
 )
 from claude_continue.claude_app import (
     BUNDLE_ID,
-    UI_READY_POLL_S,
     _element_label,
     _element_x,
     _element_y,
@@ -29,8 +28,10 @@ from claude_continue.mac_focus import (
 )
 from claude_continue.usage_parse import UsageSnapshot
 
-SIDEBAR_LEFT_X_MAX = 400
-SETTINGS_OPEN_TIMEOUT_S = 12
+SETTINGS_OPEN_TIMEOUT_S = 8
+UI_POLL_S = 0.1
+AX_PREPARE_S = 0.12
+AFTER_ACTION_S = 0.2
 
 # Left nav inside the Settings panel (not the Chat/Code/Cowork pills).
 SETTINGS_NAV_LABELS = frozenset(
@@ -53,6 +54,33 @@ SETTINGS_NAV_LABELS = frozenset(
 # Roles that often wrap a nav label in Electron settings.
 _SETTINGS_NAV_ROLES = ("AXButton", "AXLink", "AXGroup", "AXRow", "AXListItem", "AXCell")
 _PRESSABLE_ROLES = _SETTINGS_NAV_ROLES + ("AXMenuItem",)
+
+
+def _element_bounds(element: Any) -> tuple[float, float, float, float]:
+    try:
+        pos = element.AXPosition
+        size = element.AXSize
+        return float(pos.x), float(pos.y), float(size.width), float(size.height)
+    except Exception:
+        return 0.0, 0.0, 0.0, 0.0
+
+
+def _click_screen_xy(x: int, y: int) -> None:
+    run_applescript(f'tell application "System Events" to click at {{{x}, {y}}}')
+
+
+def _poll_until(
+    predicate,
+    *,
+    timeout: float = 3.0,
+    interval: float = UI_POLL_S,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
 
 
 def _collect_text_rows(app: Any) -> list[tuple[float, str]]:
@@ -228,17 +256,19 @@ def _click_settings_nav(app: Any, name: str) -> bool:
     if not candidates:
         return False
 
-    # Usage sits below General; try lower on screen first.
     ordered = sorted(candidates, key=lambda item: item[0], reverse=(name.casefold() == "usage"))
+    want_usage = name.casefold() == "usage"
 
     for _y, element in ordered:
         _activate_element(element)
-        time.sleep(0.9)
-        refreshed = _refresh_app_ref()
-        if name.casefold() == "usage":
-            if _is_usage_page_visible(refreshed):
+        if want_usage:
+            if _poll_until(
+                lambda: _is_usage_page_visible(_refresh_app_ref()),
+                timeout=2.5,
+            ):
                 return True
             continue
+        time.sleep(AFTER_ACTION_S)
         return True
     return False
 
@@ -261,25 +291,10 @@ def dump_settings_nav(app: Any) -> None:
             )
 
 
-def _click_labeled_in_sidebar(app: Any, label: str) -> bool:
-    """Click label in the left sidebar region; return True if found."""
-    for role in ("AXMenuItem", "AXButton", "AXLink", "AXStaticText"):
-        for element in app.findAllR(AXRole=role):
-            if not _matches_label(element, label):
-                continue
-            if _element_x(element) > SIDEBAR_LEFT_X_MAX:
-                continue
-            press_element(element)
-            time.sleep(0.6)
-            return True
-    return False
-
-
 def _open_settings_via_menu_bar() -> bool:
     """Menu bar fallback when ⌘, did not open Settings."""
     for item in ("Settings…", "Settings...", "Settings"):
         if run_applescript(
-            "delay 0.1",
             "tell application \"System Events\" to tell process \"Claude\"",
             f'click menu item "{item}" of menu 1 of menu bar item "Claude" of menu bar 1',
             "end tell",
@@ -289,31 +304,29 @@ def _open_settings_via_menu_bar() -> bool:
 
 
 def _wait_for_settings_panel(app: Any, *, timeout: float = SETTINGS_OPEN_TIMEOUT_S) -> Any:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = _prepare_ax_tree(app)
-        if _is_settings_panel_open(current) or _is_usage_page_visible(current):
-            return current
-        time.sleep(0.4)
-    return _prepare_ax_tree(app)
+    def _ready() -> bool:
+        nonlocal app
+        app = _refresh_app_ref()
+        return _is_settings_panel_open(app) or _is_usage_page_visible(app)
+
+    _poll_until(_ready, timeout=timeout)
+    return _refresh_app_ref()
 
 
 def _ensure_settings_open(app: Any) -> Any:
     """Open in-app Settings (⌘, first — works on home screen)."""
-    current = _prepare_ax_tree(app)
+    current = _refresh_app_ref()
     if _is_settings_panel_open(current) or _is_usage_page_visible(current):
         return current
 
     activate_claude()
     open_settings_shortcut()
-    time.sleep(0.9)
-    current = _wait_for_settings_panel(app)
+    current = _wait_for_settings_panel(app, timeout=SETTINGS_OPEN_TIMEOUT_S)
     if _is_settings_panel_open(current) or _is_usage_page_visible(current):
         return current
 
     if _open_settings_via_menu_bar():
-        time.sleep(0.9)
-        current = _wait_for_settings_panel(app)
+        current = _wait_for_settings_panel(app, timeout=4.0)
         if _is_settings_panel_open(current) or _is_usage_page_visible(current):
             return current
 
@@ -322,57 +335,170 @@ def _ensure_settings_open(app: Any) -> Any:
     )
 
 
+_ax_enabled = False
+
+
 def _prepare_ax_tree(app: Any) -> Any:
-    running = find_running_app(BUNDLE_ID)
-    if running is not None:
-        enable_manual_accessibility(running.processIdentifier())
-    time.sleep(0.5)
+    global _ax_enabled
+    if not _ax_enabled:
+        running = find_running_app(BUNDLE_ID)
+        if running is not None:
+            enable_manual_accessibility(running.processIdentifier())
+        _ax_enabled = True
+        time.sleep(AX_PREPARE_S)
     return _refresh_app_ref()
 
 
 def _navigate_to_usage(app: Any) -> Any:
+    _prepare_ax_tree(app)
     current = _ensure_settings_open(app)
 
     if _is_usage_page_visible(current):
         return current
 
     if _click_settings_nav(current, "Usage"):
-        time.sleep(0.8)
-        current = _refresh_app_ref()
-        if _is_usage_page_visible(current):
-            return current
+        return _refresh_app_ref()
 
-    current = _prepare_ax_tree(current)
-    if _click_settings_nav(current, "Usage"):
-        time.sleep(0.8)
-        current = _refresh_app_ref()
+    if _poll_until(lambda: _is_usage_page_visible(_refresh_app_ref()), timeout=1.5):
+        return _refresh_app_ref()
 
-    if not _is_usage_page_visible(current):
-        raise RuntimeError(
-            "Usage page did not open. Open Settings → Usage manually, or run "
-            "`claude-continue inspect --settings-nav` while Settings is open."
+    raise RuntimeError(
+        "Usage page did not open. Open Settings → Usage manually, or run "
+        "`claude-continue inspect --settings-nav` while Settings is open."
+    )
+
+
+def _find_settings_modal_bounds(app: Any) -> tuple[float, float, float, float] | None:
+    """Bounding box of the centered Settings card (not the full window)."""
+    anchors: list[tuple[float, float, float, float]] = []
+
+    for role in ("AXStaticText",) + _SETTINGS_NAV_ROLES:
+        for element in app.findAllR(AXRole=role):
+            label = _element_label(element).casefold()
+            if label not in SETTINGS_NAV_LABELS and label != "plan usage limits":
+                continue
+            bounds = _element_bounds(element)
+            if bounds[2] < 1:
+                continue
+            anchors.append(bounds)
+
+    if not anchors:
+        return None
+
+    left = min(b[0] for b in anchors)
+    top = min(b[1] for b in anchors)
+    right = max(b[0] + b[2] for b in anchors)
+    bottom = max(b[1] + b[3] for b in anchors)
+    pad_x, pad_y = 48, 56
+    return left - pad_x, top - pad_y, (right - left) + 2 * pad_x, (bottom - top) + 2 * pad_y
+
+
+def _find_settings_close_button(app: Any) -> Any | None:
+    """Close (X) control on the Settings modal header."""
+    modal = _find_settings_modal_bounds(app)
+    if modal is None:
+        return None
+
+    mx, my, mw, mh = modal
+    header_bottom = my + min(mh * 0.18, 72)
+    close_labels = frozenset({"close", "dismiss", "×", "x", "✕"})
+
+    best: tuple[float, Any] | None = None
+    for element in app.findAllR(AXRole="AXButton"):
+        x, y, w, h = _element_bounds(element)
+        if w < 1 or h < 1:
+            continue
+        cx, cy = x + w / 2, y + h / 2
+        if cx < mx + mw * 0.65 or cy > header_bottom:
+            continue
+        label = _element_label(element).casefold()
+        direct = _direct_labels(element)
+        is_close = (
+            any(tok in label for tok in close_labels)
+            or bool(direct & close_labels)
+            or "close" in " ".join(direct)
         )
-    return current
+        if is_close or (not label and w <= 48 and h <= 48):
+            score = cx + (header_bottom - cy)
+            if best is None or score > best[0]:
+                best = (score, element)
+    return best[1] if best else None
+
+
+def _click_settings_close(app: Any) -> bool:
+    button = _find_settings_close_button(app)
+    if button is None:
+        for label in ("Close", "×", "✕"):
+            for element in app.findAllR(AXRole="AXButton"):
+                if _matches_label(element, label):
+                    button = element
+                    break
+            if button is not None:
+                break
+    if button is None:
+        return False
+    _activate_element(button)
+    return True
+
+
+def _click_settings_backdrop(app: Any) -> bool:
+    """Click the dimmed overlay outside the Settings card."""
+    modal = _find_settings_modal_bounds(app)
+    try:
+        windows = app.windows()
+        if not windows:
+            return False
+        win = windows[0]
+        wx, wy, ww, wh = _element_bounds(win)
+    except Exception:
+        return False
+
+    if modal is None:
+        _click_screen_xy(int(wx + 40), int(wy + wh / 2))
+        return True
+
+    mx, my, mw, mh = modal
+    margin = 36
+    targets = [
+        (int(mx - margin), int(my + mh / 2)),
+        (int(mx + mw + margin), int(my + mh / 2)),
+        (int(wx + ww / 2), int(my - margin)),
+        (int(wx + ww / 2), int(my + mh + margin)),
+    ]
+    for x, y in targets:
+        if wx + 8 <= x <= wx + ww - 8 and wy + 8 <= y <= wy + wh - 8:
+            inside_modal = mx <= x <= mx + mw and my <= y <= my + mh
+            if not inside_modal:
+                _click_screen_xy(x, y)
+                return True
+    _click_screen_xy(int(wx + 40), int(wy + wh / 2))
+    return True
 
 
 def close_settings(app: Any) -> None:
-    """Leave Settings and return to the main Claude window."""
+    """Leave Settings: X button, then backdrop click, then ⌘, toggle."""
     current = _prepare_ax_tree(app)
     if not _is_settings_panel_open(current):
         return
 
-    for label in ("Close", "Done", "Back"):
-        if _click_labeled_in_sidebar(current, label):
-            time.sleep(0.5)
-            current = _refresh_app_ref()
-            if not _is_settings_panel_open(current):
-                activate_claude()
-                return
+    activate_claude()
 
-    keystroke_in_claude(
-        'tell application "System Events" to keystroke "," using command down',
-    )
-    time.sleep(0.5)
+    def _closed() -> bool:
+        return not _is_settings_panel_open(_refresh_app_ref())
+
+    if _click_settings_close(current):
+        if _poll_until(_closed, timeout=2.0):
+            activate_claude()
+            return
+
+    current = _refresh_app_ref()
+    if _click_settings_backdrop(current):
+        if _poll_until(_closed, timeout=2.0):
+            activate_claude()
+            return
+
+    open_settings_shortcut()
+    _poll_until(_closed, timeout=2.0)
     activate_claude()
 
 
@@ -382,7 +508,7 @@ def open_usage_page(app: Any) -> Any:
     def _open() -> Any:
         return _navigate_to_usage(app)
 
-    return retry(_open, description="open Settings → Usage", attempts=3, delay=1.0)
+    return retry(_open, description="open Settings → Usage", attempts=2, delay=0.35)
 
 
 def read_usage_snapshot(app: Any) -> UsageSnapshot:
@@ -449,11 +575,10 @@ def read_usage_snapshot(app: Any) -> UsageSnapshot:
 
 
 def wait_for_usage_rows(app: Any) -> Any:
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        current = _prepare_ax_tree(app)
-        rows = _collect_text_rows(current)
-        if any("all models" in t.lower() for _y, t in rows):
-            return current
-        time.sleep(UI_READY_POLL_S)
+    def _has_rows() -> bool:
+        rows = _collect_text_rows(_refresh_app_ref())
+        return any("all models" in t.lower() for _y, t in rows)
+
+    if _poll_until(_has_rows, timeout=20):
+        return _refresh_app_ref()
     raise RuntimeError("Usage page did not show usage data in time")
