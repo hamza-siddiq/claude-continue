@@ -36,6 +36,8 @@ With no flags, the tool opens the bottom sidebar menu → **Settings** → **Usa
 | **Current session** at 100% (all models not full) | Countdown + 1 minute (e.g. `Resets in 3 hr 53 min` → run in 3 hr 54 min) |
 | Neither at 100% | Asks whether to run now |
 
+At the scheduled time, continue is sent **up to 3 times**: immediately, then after **30 seconds**, then after **1 more minute** (~90s from the first try), stopping early if a attempt succeeds.
+
 ```bash
 claude-continue code
 claude-continue chat
