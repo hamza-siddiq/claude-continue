@@ -12,7 +12,12 @@ from claude_continue.usage_parse import (
     UsageNotLimitedError,
     run_at_from_snapshot,
 )
-from claude_continue.usage_ui import open_usage_page, read_usage_snapshot, wait_for_usage_rows
+from claude_continue.usage_ui import (
+    close_settings,
+    open_usage_page,
+    read_usage_snapshot,
+    wait_for_usage_rows,
+)
 
 ScheduleOutcome = Literal["run_now", "cancelled"]
 
@@ -42,23 +47,27 @@ def resolve_run_time_from_usage(*, manual_at: str | None = None) -> datetime | S
     app = get_app_ref()
     app = open_usage_page(app)
     app = wait_for_usage_rows(app)
-    snapshot = read_usage_snapshot(app)
-
-    print(
-        f"Usage: all_models={'100%' if snapshot.all_models_full else 'ok'}, "
-        f"session={'100%' if snapshot.session_full else 'ok'}"
-    )
-    if snapshot.all_models_reset_text:
-        print(f"  All models reset: {snapshot.all_models_reset_text}")
-    if snapshot.session_reset_text:
-        print(f"  Session reset: {snapshot.session_reset_text}")
-
     try:
-        run_at = run_at_from_snapshot(snapshot)
-        print(f"Scheduled for {run_at.strftime('%Y-%m-%d %I:%M %p')}")
-        return run_at
-    except UsageNotLimitedError:
-        return prompt_run_now()
+        snapshot = read_usage_snapshot(app)
+
+        print(
+            f"Usage: all_models={'100%' if snapshot.all_models_full else 'ok'}, "
+            f"session={'100%' if snapshot.session_full else 'ok'}"
+        )
+        if snapshot.all_models_reset_text:
+            print(f"  All models reset: {snapshot.all_models_reset_text}")
+        if snapshot.session_reset_text:
+            print(f"  Session reset: {snapshot.session_reset_text}")
+
+        try:
+            run_at = run_at_from_snapshot(snapshot)
+            print(f"Scheduled for {run_at.strftime('%Y-%m-%d %I:%M %p')}")
+            return run_at
+        except UsageNotLimitedError:
+            return prompt_run_now()
+    finally:
+        close_settings(app)
+        print("Closed Settings.")
 
 
 def wait_until_run(*, manual_at: str | None = None) -> ScheduleOutcome:

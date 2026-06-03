@@ -65,6 +65,7 @@ def run_inspect(*, max_depth: int = 6, sidebar: bool = False, usage: bool = Fals
 
     if usage:
         from claude_continue.usage_ui import (
+            close_settings,
             open_usage_page,
             read_usage_snapshot,
             wait_for_usage_rows,
@@ -86,6 +87,8 @@ def run_inspect(*, max_depth: int = 6, sidebar: bool = False, usage: bool = Fals
         except Exception as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        finally:
+            close_settings(app)
         return 0
 
     if sidebar:

@@ -30,6 +30,24 @@ from claude_continue.usage_parse import UsageSnapshot
 SIDEBAR_BOTTOM_Y_MIN = 600
 SIDEBAR_LEFT_X_MAX = 400
 
+# Left nav inside the Settings panel (not the Chat/Code/Cowork pills).
+SETTINGS_NAV_LABELS = frozenset(
+    {
+        "usage",
+        "general",
+        "profile",
+        "account",
+        "privacy",
+        "billing",
+        "capabilities",
+        "connectors",
+        "hotkeys",
+        "desktop app",
+        "labs",
+        "appearance",
+    }
+)
+
 
 def _collect_text_rows(app: Any) -> list[tuple[float, str]]:
     rows: list[tuple[float, str]] = []
@@ -50,11 +68,36 @@ def _is_usage_page_visible(app: Any) -> bool:
     return False
 
 
-def _is_settings_visible(app: Any) -> bool:
+def _is_settings_panel_open(app: Any) -> bool:
+    """True when the in-app Settings sheet is open (any section)."""
+    if _is_usage_page_visible(app):
+        return True
+    for element in app.findAllR(AXRole="AXButton"):
+        if _element_x(element) > SIDEBAR_LEFT_X_MAX:
+            continue
+        label = _element_label(element).strip().lower()
+        if label in SETTINGS_NAV_LABELS:
+            return True
     for _y, label in _collect_text_rows(app):
-        if label.strip().lower() == "settings":
+        if label.strip().lower() == "plan usage limits":
             return True
     return False
+
+
+def _click_usage_in_settings_sidebar(app: Any) -> bool:
+    candidates: list[tuple[float, Any]] = []
+    for element in app.findAllR(AXRole="AXButton"):
+        if not _matches_label(element, "Usage"):
+            continue
+        if _element_x(element) > SIDEBAR_LEFT_X_MAX:
+            continue
+        candidates.append((_element_y(element), element))
+    if not candidates:
+        return False
+    candidates.sort(key=lambda item: item[0])
+    press_element(candidates[0][1])
+    time.sleep(0.6)
+    return True
 
 
 def _click_labeled(app: Any, label: str, *, prefer_roles: tuple[str, ...] | None = None) -> None:
@@ -161,50 +204,78 @@ def _navigate_to_usage(current: Any) -> Any:
     if _is_usage_page_visible(current):
         return current
 
-    if _click_labeled_in_sidebar(current, "Usage"):
+    if _is_settings_panel_open(current):
+        if _click_usage_in_settings_sidebar(current):
+            time.sleep(0.8)
+            current = _refresh_app_ref()
+            if _is_usage_page_visible(current):
+                return current
+
+    if _click_usage_in_settings_sidebar(current):
         time.sleep(0.8)
         current = _refresh_app_ref()
         if _is_usage_page_visible(current):
             return current
 
-    if _is_settings_visible(current) or _click_labeled_in_sidebar(current, "Settings"):
-        time.sleep(0.8)
-        current = _refresh_app_ref()
-        _click_labeled(current, "Usage", prefer_roles=("AXButton", "AXLink"))
-        time.sleep(0.8)
-        current = _refresh_app_ref()
-        if _is_usage_page_visible(current):
-            return current
+    if not _is_settings_panel_open(current):
+        if _click_labeled_in_sidebar(current, "Settings"):
+            time.sleep(0.8)
+            current = _refresh_app_ref()
+            if _click_usage_in_settings_sidebar(current):
+                time.sleep(0.8)
+                current = _refresh_app_ref()
+                if _is_usage_page_visible(current):
+                    return current
 
     _open_settings_via_keyboard()
     current = _refresh_app_ref()
-    if _is_settings_visible(current) or _is_usage_page_visible(current):
-        if not _is_usage_page_visible(current):
-            _click_labeled(current, "Usage", prefer_roles=("AXButton", "AXLink"))
-            time.sleep(0.8)
-            current = _refresh_app_ref()
-        if _is_usage_page_visible(current):
-            return current
+    if not _is_usage_page_visible(current):
+        _click_usage_in_settings_sidebar(current)
+        time.sleep(0.8)
+        current = _refresh_app_ref()
+    if _is_usage_page_visible(current):
+        return current
 
     _open_settings_via_menu_bar()
     current = _refresh_app_ref()
     if not _is_usage_page_visible(current):
-        _click_labeled(current, "Usage", prefer_roles=("AXButton", "AXLink"))
+        _click_usage_in_settings_sidebar(current)
         time.sleep(0.8)
         current = _refresh_app_ref()
 
-    if not _is_usage_page_visible(current):
+    if not _is_usage_page_visible(current) and not _is_settings_panel_open(current):
         _open_bottom_account_menu(current)
         current = _refresh_app_ref()
         _click_labeled(current, "Settings", prefer_roles=("AXMenuItem", "AXButton"))
         current = _refresh_app_ref()
-        _click_labeled(current, "Usage", prefer_roles=("AXButton", "AXLink"))
+        _click_usage_in_settings_sidebar(current)
         time.sleep(0.8)
         current = _refresh_app_ref()
 
     if not _is_usage_page_visible(current):
         raise RuntimeError("Usage page did not open (Plan usage limits not found)")
     return current
+
+
+def close_settings(app: Any) -> None:
+    """Leave Settings and return to the main Claude window."""
+    current = _prepare_ax_tree(app)
+    if not _is_settings_panel_open(current):
+        return
+
+    for label in ("Close", "Done", "Back"):
+        if _click_labeled_in_sidebar(current, label):
+            time.sleep(0.5)
+            current = _refresh_app_ref()
+            if not _is_settings_panel_open(current):
+                activate_claude()
+                return
+
+    keystroke_in_claude(
+        'tell application "System Events" to keystroke "," using command down',
+    )
+    time.sleep(0.5)
+    activate_claude()
 
 
 def open_usage_page(app: Any) -> Any:
