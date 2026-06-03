@@ -1,4 +1,4 @@
-# claude-continuer
+# claude-continue
 
 macOS CLI tool that continues Claude Desktop **Code** sessions on a schedule. When a session time limit is reached, run this tool at a clock time you choose—it activates Claude, opens the **Code** sidebar tab, selects the first chat under **Recents**, types `continue`, and presses Enter.
 
@@ -12,7 +12,7 @@ macOS CLI tool that continues Claude Desktop **Code** sessions on a schedule. Wh
 ## Install
 
 ```bash
-cd /Users/hamza/Documents/Projects/GitHub/claude-continuer
+cd /Users/hamza/Documents/Projects/GitHub/claude-continue
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -29,7 +29,7 @@ pip install -e .
 With Claude open:
 
 ```bash
-claude-continuer inspect --depth 6
+claude-continue inspect --depth 6
 ```
 
 You should see elements with titles like `Code` and `Recents` in the output.
@@ -39,15 +39,15 @@ You should see elements with titles like `Code` and `Recents` in the output.
 Run immediately (for testing):
 
 ```bash
-claude-continuer continue --now
+claude-continue continue --now
 ```
 
 Wait until a clock time, then run once:
 
 ```bash
-claude-continuer continue --at "4:20pm"
-claude-continuer continue --at "7:30 am"
-claude-continuer continue --at "16:20"
+claude-continue continue --at "4:20pm"
+claude-continue continue --at "7:30 am"
+claude-continue continue --at "16:20"
 ```
 
 `--at` uses **minute precision** (seconds are ignored). Schedule at least one minute ahead of the current time.
@@ -55,13 +55,13 @@ claude-continuer continue --at "16:20"
 If the time has already passed today, the tool waits until **the same time tomorrow**. Use `--today-only` to fail instead:
 
 ```bash
-claude-continuer continue --at "4:20pm" --today-only
+claude-continue continue --at "4:20pm" --today-only
 ```
 
 Debug the UI tree:
 
 ```bash
-claude-continuer inspect --depth 8
+claude-continue inspect --depth 8
 ```
 
 ## What it does (continue mode)

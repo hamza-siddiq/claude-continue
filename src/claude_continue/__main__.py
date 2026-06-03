@@ -1,4 +1,4 @@
-from claude_continuer.cli import main
+from claude_continue.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from claude_continuer.ax import get_attr
-from claude_continuer.claude_app import get_app_ref
+from claude_continue.ax import get_attr
+from claude_continue.claude_app import get_app_ref
 
 
 def _dump(element: Any, depth: int, max_depth: int, indent: int) -> None:

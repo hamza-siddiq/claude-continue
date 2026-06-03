@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from claude_continuer import __version__
-from claude_continuer.inspect_cmd import run_inspect
-from claude_continuer.modes import continue_mode
-from claude_continuer.schedule import next_run_at, parse_time_string, sleep_until
+from claude_continue import __version__
+from claude_continue.inspect_cmd import run_inspect
+from claude_continue.modes import continue_mode
+from claude_continue.schedule import next_run_at, parse_time_string, sleep_until
 
 
 def _cmd_continue(args: argparse.Namespace) -> int:
@@ -31,7 +31,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="claude-continuer",
+        prog="claude-continue",
         description="Automate Claude Desktop when session time limits are reached.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

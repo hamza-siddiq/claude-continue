@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from claude_continuer import claude_app
+from claude_continue import claude_app
 
 
 def run_continue() -> int:
@@ -25,5 +25,5 @@ def run_continue() -> int:
         return 0
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        print("Tip: run `claude-continuer inspect` to debug the UI tree.", file=sys.stderr)
+        print("Tip: run `claude-continue inspect` to debug the UI tree.", file=sys.stderr)
         return 1

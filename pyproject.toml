@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-continuer"
+name = "claude-continue"
 version = "0.1.0"
 description = "Scheduled macOS automation to continue Claude Code sessions when time limits hit."
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-claude-continuer = "claude_continuer.cli:main"
+claude-continue = "claude_continue.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

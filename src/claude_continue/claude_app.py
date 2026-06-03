@@ -9,7 +9,7 @@ from typing import Any
 import atomacos
 from atomacos import keyboard as ax_keyboard
 
-from claude_continuer.ax import (
+from claude_continue.ax import (
     enable_manual_accessibility,
     find_running_app,
     get_attr,
