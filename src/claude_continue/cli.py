@@ -9,38 +9,21 @@ from claude_continue import __version__
 from claude_continue.claude_app import ContinueTarget
 from claude_continue.inspect_cmd import run_inspect
 from claude_continue.modes import continue_mode
-from claude_continue.schedule import next_run_at, parse_time_string, sleep_until
+from claude_continue.usage_schedule import wait_until_run
 
 
 def _add_schedule_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--at",
         metavar="TIME",
-        help='Clock time to run, e.g. "4:20pm" or "7:30 am"',
-    )
-    parser.add_argument(
-        "--now",
-        action="store_true",
-        help="Run immediately without waiting",
-    )
-    parser.add_argument(
-        "--today-only",
-        action="store_true",
-        help="Fail if --at time already passed today (default: run tomorrow)",
+        help='Override: run at clock time, e.g. "4:20pm" (default: read Usage page)',
     )
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    if not args.now:
-        if not args.at:
-            print("Error: provide --at TIME or --now", file=sys.stderr)
-            return 2
-        hour, minute = parse_time_string(args.at)
-        target_time = next_run_at(hour, minute, today_only=args.today_only)
-        print(f"Waiting until {target_time.strftime('%Y-%m-%d %I:%M %p')}...")
-        sleep_until(target_time)
-        print("Scheduled time reached.")
-
+    outcome = wait_until_run(manual_at=args.at)
+    if outcome == "cancelled":
+        return 1
     return continue_mode.run_continue(target=args.target)
 
 
@@ -62,7 +45,10 @@ def _make_run_parser(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="claude-continue",
-        description="Automate Claude Desktop when session time limits are reached.",
+        description=(
+            "Continue Claude Desktop Code or Chat sessions when limits are reached. "
+            "Without --at, reads Settings → Usage to decide when to run."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -71,13 +57,13 @@ def main(argv: list[str] | None = None) -> int:
         subparsers,
         "code",
         "code",
-        "Code tab: first Recents chat, send 'continue' in Prompt",
+        "Code tab: schedule from Usage (or --at), then send 'continue'",
     )
     _make_run_parser(
         subparsers,
         "chat",
         "chat",
-        "Chat tab: first Recents chat, send 'continue' in the composer",
+        "Chat tab: schedule from Usage (or --at), then send 'continue'",
     )
 
     inspect_parser = subparsers.add_parser(

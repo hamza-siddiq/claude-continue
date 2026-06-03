@@ -1,6 +1,6 @@
 # claude-continue
 
-macOS CLI tool that continues Claude Desktop **Code** or **Chat** sessions on a schedule. When a session time limit is reached, run this tool at a clock time you choose—it activates Claude, switches to the right tab, opens the first chat under **Recents** (skipping **Pinned**), types `continue`, and presses Enter.
+macOS CLI tool that continues Claude Desktop **Code** or **Chat** sessions when usage limits are reached. It reads **Settings → Usage** to decide when to run, opens the first chat under **Recents** (skipping **Pinned**), types `continue`, and presses Enter.
 
 ## Requirements
 
@@ -24,63 +24,54 @@ pip install -e .
 2. Enable your terminal app (e.g. Terminal, iTerm, or Cursor)
 3. On first run, macOS may ask to allow controlling **Claude**—allow it
 
-### Verify
-
-With Claude open:
-
-```bash
-claude-continue inspect --depth 6
-```
-
-You should see elements with titles like `Code`, `Chat`, `Recents`, and optionally `Pinned` in the output.
-
 ## Usage
 
-Run immediately (for testing):
+### Automatic scheduling (default)
+
+With no flags, the tool opens the bottom sidebar menu → **Settings** → **Usage**, then:
+
+| Usage state | When it runs continue |
+|-------------|------------------------|
+| **All models** at 100% | At the reset clock time (e.g. `Resets Wed 12:00 PM`) |
+| **Current session** at 100% (all models not full) | Countdown + 1 minute (e.g. `Resets in 3 hr 53 min` → run in 3 hr 54 min) |
+| Neither at 100% | Asks whether to run now |
 
 ```bash
-claude-continue code --now
-claude-continue chat --now
+claude-continue code
+claude-continue chat
 ```
 
-Wait until a clock time, then run once:
+### Manual time override
 
 ```bash
 claude-continue code --at "4:20pm"
 claude-continue chat --at "7:30 am"
-claude-continue chat --at "16:20"
 ```
 
-`--at` uses **minute precision** (seconds are ignored). Schedule at least one minute ahead of the current time.
+`--at` uses **minute precision**. If that time already passed today, it waits until the same time **tomorrow**.
 
-If the time has already passed today, the tool waits until **the same time tomorrow**. Use `--today-only` to fail instead:
-
-```bash
-claude-continue code --at "4:20pm" --today-only
-```
-
-Debug the UI tree:
+### Debug
 
 ```bash
-claude-continue inspect --depth 8
+claude-continue inspect --depth 10
 claude-continue inspect --sidebar
 ```
 
 ## What it does
 
 1. Launch and focus Claude Desktop
-2. Switch to **Code** or **Chat** via the top nav pills (if you are on another tab)
-3. Skip any **Pinned** chats above **Recents**; click the first chat **below** the Recents heading
-4. Type `continue` in the tab’s composer and press Enter
-   - **Code:** **Prompt** field
-   - **Chat:** “Write your prompt…” field
+2. Open **Settings → Usage** (via the bottom sidebar menu) unless `--at` is set
+3. Schedule from usage bars, or use `--at`
+4. Switch to **Code** or **Chat**
+5. Click the first chat below **Recents** (skip **Pinned**)
+6. Type `continue` and press Enter
 
 ## Limitations
 
-- UI labels must match the English Claude app (`Code`, `Chat`, `Recents`, `Pinned`)
-- Claude UI updates may break element matching—use `inspect` to tune selectors
-- Automation is inherently fragile; test with `--now` before relying on a schedule
-- Cowork tab is not supported yet
+- English UI labels (`Settings`, `Usage`, `Recents`, etc.)
+- Usage layout must match what Claude Desktop exposes to Accessibility
+- Fragile if Claude changes UI—use `inspect` to debug
+- Cowork tab not supported
 
 ## License
 
