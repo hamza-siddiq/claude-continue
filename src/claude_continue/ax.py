@@ -55,6 +55,18 @@ def press_element(element: Any) -> None:
         raise RuntimeError(f"Could not activate element: {exc}") from exc
 
 
+def show_menu(element: Any) -> None:
+    """Open a control's menu (profile chevron, etc.)."""
+    try:
+        actions = element.getActions()
+        if "ShowMenu" in actions:
+            element.ShowMenu()
+            return
+    except Exception:
+        pass
+    press_element(element)
+
+
 def retry(fn, *, attempts: int = 3, delay: float = 0.5, description: str = "action"):
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):

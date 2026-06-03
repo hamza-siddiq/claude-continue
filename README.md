@@ -55,6 +55,7 @@ claude-continue chat --at "7:30 am"
 ```bash
 claude-continue inspect --depth 10
 claude-continue inspect --sidebar
+claude-continue inspect --usage
 ```
 
 ## What it does

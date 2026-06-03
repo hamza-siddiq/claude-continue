@@ -28,7 +28,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    return run_inspect(max_depth=args.depth, sidebar=args.sidebar)
+    return run_inspect(max_depth=args.depth, sidebar=args.sidebar, usage=args.usage)
 
 
 def _make_run_parser(
@@ -80,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         "--sidebar",
         action="store_true",
         help="List sidebar chat row candidates (for debugging Recents selection)",
+    )
+    inspect_parser.add_argument(
+        "--usage",
+        action="store_true",
+        help="Open Settings → Usage and print detected limits (debug)",
     )
     inspect_parser.set_defaults(func=_cmd_inspect)
 

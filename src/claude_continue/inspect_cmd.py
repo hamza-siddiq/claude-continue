@@ -56,12 +56,37 @@ def _dump_sidebar_candidates(app: Any) -> None:
             )
 
 
-def run_inspect(*, max_depth: int = 6, sidebar: bool = False) -> int:
+def run_inspect(*, max_depth: int = 6, sidebar: bool = False, usage: bool = False) -> int:
     try:
         app = get_app_ref()
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if usage:
+        from claude_continue.usage_ui import (
+            open_usage_page,
+            read_usage_snapshot,
+            wait_for_usage_rows,
+            _collect_text_rows,
+        )
+
+        try:
+            app = open_usage_page(app)
+            app = wait_for_usage_rows(app)
+            snap = read_usage_snapshot(app)
+            print("Usage snapshot:")
+            print(f"  all_models_full={snap.all_models_full}")
+            print(f"  session_full={snap.session_full}")
+            print(f"  all_models_reset={snap.all_models_reset_text!r}")
+            print(f"  session_reset={snap.session_reset_text!r}")
+            print("\nText rows on page:")
+            for y, text in _collect_text_rows(app):
+                print(f"  y={y:6.0f}  {text[:80]!r}")
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
 
     if sidebar:
         _dump_sidebar_candidates(app)
