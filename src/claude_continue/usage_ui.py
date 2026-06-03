@@ -1,8 +1,7 @@
 """Navigate Claude Desktop Settings → Usage and read limit state.
 
-Layout reference (repo root): Home.png (chat home + usage banner), Settings.png
-(⌘, opens Settings on Desktop app → General; Usage is in the main nav above
-the "Desktop app" section — two "General" rows exist).
+Layout: home screen usage banner; ⌘, opens Settings on Desktop app → General;
+Usage is in the main nav above the "Desktop app" section (two "General" rows exist).
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ from claude_continue import __version__
 from claude_continue.claude_app import ContinueTarget
 from claude_continue.inspect_cmd import run_inspect
 from claude_continue.mac_focus import suppress_python_dock_icon
-from claude_continue.modes import continue_mode
+from claude_continue.modes import continue_mode, enter_mode
 from claude_continue.usage_schedule import wait_until_run
 
 
@@ -26,6 +26,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if outcome == "cancelled":
         return 1
     return continue_mode.run_continue(target=args.target)
+
+
+def _cmd_run_enter(args: argparse.Namespace) -> int:
+    outcome = wait_until_run(manual_at=args.at)
+    if outcome == "cancelled":
+        return 1
+    return enter_mode.run_enter()
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -72,6 +79,16 @@ def main(argv: list[str] | None = None) -> int:
         "chat",
         "Chat tab: schedule from Usage (or --at), then send 'continue'",
     )
+
+    enter_parser = subparsers.add_parser(
+        "enter",
+        help=(
+            "Schedule from Usage (or --at), then press Enter in the visible "
+            "prompt (no navigation, no typing)"
+        ),
+    )
+    _add_schedule_args(enter_parser)
+    enter_parser.set_defaults(func=_cmd_run_enter)
 
     inspect_parser = subparsers.add_parser(
         "inspect",

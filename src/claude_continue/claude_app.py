@@ -199,6 +199,100 @@ def get_app_ref_for_usage() -> Any:
     return _refresh_app_ref()
 
 
+def get_app_ref_minimal() -> Any:
+    """AX ref for enter-only mode — no sidebar readiness wait."""
+    launch_if_needed(foreground=True)
+    activate()
+    running = find_running_app(BUNDLE_ID)
+    if running is None:
+        raise RuntimeError("Claude is not running")
+    enable_manual_accessibility(running.processIdentifier())
+    time.sleep(0.5)
+    return _refresh_app_ref()
+
+
+def _element_bounds(element: Any) -> tuple[float, float, float, float]:
+    try:
+        pos = element.AXPosition
+        size = element.AXSize
+        return float(pos.x), float(pos.y), float(size.width), float(size.height)
+    except Exception:
+        return 0.0, 0.0, 0.0, 0.0
+
+
+def _bounds_intersect(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+
+def _main_window(app: Any) -> Any | None:
+    try:
+        windows = app.windows()
+        if windows:
+            return windows[0]
+    except Exception:
+        pass
+    return None
+
+
+def _composer_text(element: Any) -> str:
+    return get_attr(element, "AXValue").strip()
+
+
+def _is_in_main_window(element: Any, window: Any) -> bool:
+    ex, ey, ew, eh = _element_bounds(element)
+    if ew < 20 or eh < 20:
+        return False
+    wx, wy, ww, wh = _element_bounds(window)
+    if ww < 20 or wh < 20:
+        return False
+    return _bounds_intersect((ex, ey, ew, eh), (wx, wy, ww, wh))
+
+
+def find_visible_filled_composer(app: Any) -> Any | None:
+    """Bottom-most in-window text field/area that already has text."""
+    window = _main_window(app)
+    if window is None:
+        return None
+
+    candidates: list[Any] = []
+    for role in ("AXTextArea", "AXTextField"):
+        for element in app.findAllR(AXRole=role):
+            if not _composer_text(element):
+                continue
+            if not _is_in_main_window(element, window):
+                continue
+            candidates.append(element)
+
+    if not candidates:
+        return None
+    return max(candidates, key=_element_y)
+
+
+def send_enter_only(app: Any) -> None:
+    """Focus the visible filled prompt and press Return (no navigation or typing)."""
+
+    def _send() -> None:
+        time.sleep(0.3)
+
+        composer = find_visible_filled_composer(app)
+        if composer is None:
+            raise RuntimeError(
+                "No in-view prompt with text found. "
+                "Open the session and type your message first."
+            )
+
+        press_element(composer)
+        time.sleep(0.25)
+        _press_return(composer)
+
+    retry(_send, description="press Enter in prompt")
+
+
 def is_sidebar_tab_active(tab: Any) -> bool:
     return get_attr(tab, "AXARIACurrent") == "page"
 

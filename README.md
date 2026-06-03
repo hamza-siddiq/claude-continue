@@ -5,8 +5,9 @@
 A macOS CLI that reads **Settings → Usage**, waits until the right moment, then opens your first **Recents** chat on the **Code** or **Chat** tab and submits `continue`—so you do not have to babysit the reset clock.
 
 ```bash
-claude-continue code    # Code tab
-claude-continue chat    # Chat tab
+claude-continue code    # Code tab → first Recents chat → type continue
+claude-continue chat    # Chat tab → first Recents chat → type continue
+claude-continue enter   # Press Enter in the visible prompt (no navigation)
 ```
 
 ---
@@ -41,18 +42,21 @@ flowchart LR
   D --> F
   F --> G[Wait until scheduled time]
   G --> H[Launch Claude]
-  H --> I[Code or Chat tab]
-  I --> J[First chat under Recents]
-  J --> K["Type continue + Enter"]
-  K --> L{Success?}
-  L -->|No| M[Retry up to 3×]
-  L -->|Yes| N[Done]
-  M --> K
+  H --> I{command?}
+  I -->|code or chat| J[Code or Chat tab]
+  J --> K[First chat under Recents]
+  K --> L["Type continue + Enter"]
+  I -->|enter| M[Click filled prompt + Enter]
+  L --> N{Success?}
+  M --> N
+  N -->|No| O[Retry up to 3×]
+  N -->|Yes| P[Done]
+  O --> L
 ```
 
 1. **Schedule** — From the Usage page (or `--at`), decide when to run.
 2. **Wait** — Sleep in short chunks; the Mac may sleep; energy-friendly wake hints when far away.
-3. **Continue** — Focus Claude, switch tab, open the first chat below **Recents** (skip **Pinned**), send `continue`, retry if needed.
+3. **Run** — `code` / `chat`: focus Claude, switch tab, open the first chat below **Recents** (skip **Pinned**), send `continue`. `enter`: focus Claude, click the in-view prompt that **already has text**, press **Enter** only (no tab switch, no Recents, no typing).
 
 Claude can be closed during the wait. The tool launches and focuses it at run time.
 
@@ -105,13 +109,14 @@ Without Accessibility, the tool cannot read the UI or send keystrokes.
 |---------|-------------|
 | `claude-continue code` | Schedule from Usage (or `--at`), then continue on the **Code** tab |
 | `claude-continue chat` | Same for the **Chat** tab |
+| `claude-continue enter` | Schedule from Usage (or `--at`), then press **Enter** in the visible prompt (draft text required) |
 | `claude-continue inspect` | Dump the accessibility tree for debugging |
 
 ### Options
 
 | Flag | Commands | Description |
 |------|----------|-------------|
-| `--at TIME` | `code`, `chat` | Skip Usage; run at a clock time, e.g. `"4:20pm"`, `"7:30 am"`, `"16:20"` |
+| `--at TIME` | `code`, `chat`, `enter` | Skip Usage; run at a clock time, e.g. `"4:20pm"`, `"7:30 am"`, `"16:20"` |
 | `--version` | all | Print version and exit |
 
 `--at` uses **minute precision**. If that time already passed today, the tool waits until the same time **tomorrow**.
@@ -128,6 +133,9 @@ claude-continue chat
 # Run at a specific time (ignore Usage)
 claude-continue code --at "12:00pm"
 claude-continue chat --at "7:30 am"
+
+# Submit a draft you already typed (leave the right session open)
+claude-continue enter --at "12:00pm"
 
 # Keep running after you close the terminal window (optional)
 nohup claude-continue code >> ~/claude-continue.log 2>&1 &
@@ -167,7 +175,7 @@ With no `--at`, the tool opens **Settings** (**⌘,**), selects **Usage** in the
 
 ### Retries at run time
 
-At the scheduled time, the tool sends `continue` **up to 3 times**:
+At the scheduled time, `code` / `chat` send `continue` and `enter` presses **Enter** in the prompt — each **up to 3 times**:
 
 | Attempt | When |
 |---------|------|
@@ -176,6 +184,15 @@ At the scheduled time, the tool sends `continue` **up to 3 times**:
 | 3 | 60 seconds after attempt 2 (~90s after the first) |
 
 Stops early if an attempt succeeds.
+
+### Enter mode
+
+Use `enter` when you already have the right **Code** or **Chat** session open and draft text in the prompt (e.g. a pre-typed `continue` or custom message). Before the scheduled time:
+
+1. Open the session you want.
+2. Type your message in the prompt but **do not** send it.
+
+At run time the tool finds the bottom-most in-window text field with non-empty content and presses **Enter**. It does not switch tabs or open Recents.
 
 ---
 
@@ -199,10 +216,8 @@ The tool **does not** keep your Mac awake for the entire wait.
 
 Claude Desktop layout this tool expects:
 
-| Screenshot | Shows |
-|------------|--------|
-| [Home.png](Home.png) | Home screen with usage banner (`Usage limit reached • Resets …`) |
-| [Settings.png](Settings.png) | Settings after **⌘,** — **Usage** in the upper nav (General … Billing → **Usage** → Capabilities …), above **Desktop app** |
+- **Home** — usage banner when limited (`Usage limit reached • Resets …`)
+- **Settings** (**⌘,**) — **Usage** in the **upper** nav (General … Billing → **Usage** → Capabilities …), above the **Desktop app** section
 
 The automation always uses **⌘,** then **Usage** in that upper list — not the second **General** under **Desktop app**.
 
@@ -238,6 +253,7 @@ Use these when Anthropic ships a UI change and selectors stop matching.
 | **Wrong tab or chat** | Run `claude-continue inspect --sidebar`; check English UI labels |
 | **Missed reset after sleep** | Ensure the CLI process is still running; prefer plugged-in / lid open; check logs if using `nohup` |
 | **Nothing happens until I click Claude** | Update to latest build (foreground launch at continue time); grant Automation permission for Claude |
+| **`enter`: no prompt with text** | Open the target session and type your draft before the scheduled time; the prompt must have visible non-empty text |
 
 ---
 
@@ -270,6 +286,9 @@ src/claude_continue/
   schedule.py         # Wait until target time
   power.py            # Sleep / wake / caffeinate helpers
   claude_app.py       # Tab, Recents, composer automation
+  modes/
+    continue_mode.py  # code / chat pipeline
+    enter_mode.py     # enter-only pipeline
 tests/
 ```
 
