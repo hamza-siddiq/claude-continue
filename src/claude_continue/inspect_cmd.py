@@ -79,10 +79,18 @@ def run_inspect(
             return 1
 
     if settings_nav:
-        from claude_continue.usage_ui import _ensure_settings_open, dump_settings_nav
+        from claude_continue.usage_ui import (
+            _build_settings_nav_index,
+            _ensure_settings_open,
+            _is_settings_panel_open,
+            dump_settings_nav,
+        )
 
         try:
-            app = _ensure_settings_open(app)
+            if not _is_settings_panel_open(app):
+                app = _ensure_settings_open(app)
+            else:
+                _build_settings_nav_index(app)
             dump_settings_nav(app)
         except Exception as exc:
             print(f"Error: {exc}", file=sys.stderr)
