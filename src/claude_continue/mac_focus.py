@@ -30,16 +30,16 @@ def activate_claude() -> None:
     for app in NSWorkspace.sharedWorkspace().runningApplications():
         if app.bundleIdentifier() == BUNDLE_ID:
             app.activateWithOptions_(_ACTIVATE_IGNORE_OTHERS)
-            time.sleep(0.25)
+            time.sleep(0.1)
             return
     subprocess.run(["open", "-gj", "-a", APP_NAME], check=False)
     for _ in range(20):
         for app in NSWorkspace.sharedWorkspace().runningApplications():
             if app.bundleIdentifier() == BUNDLE_ID:
                 app.activateWithOptions_(_ACTIVATE_IGNORE_OTHERS)
-                time.sleep(0.25)
+                time.sleep(0.1)
                 return
-        time.sleep(0.25)
+        time.sleep(0.15)
 
 
 def run_applescript(*lines: str) -> bool:
@@ -49,7 +49,6 @@ def run_applescript(*lines: str) -> bool:
     for line in lines:
         args.extend(["-e", line])
     result = subprocess.run(args, capture_output=True, text=True)
-    activate_claude()
     return result.returncode == 0
 
 
@@ -58,8 +57,38 @@ def keystroke_in_claude(*applescript_body: str) -> None:
     run_applescript(*applescript_body)
 
 
+def click_at_screen(x: int, y: int) -> None:
+    """Click screen coordinates in Claude's process (not global Space)."""
+    activate_claude()
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            "tell application \"System Events\" to tell process \"Claude\"",
+            "-e",
+            "set frontmost to true",
+            "-e",
+            f"click at {{{x}, {y}}}",
+            "-e",
+            "end tell",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
 def open_settings_shortcut() -> None:
     """Open Claude Settings via ⌘, (works from home screen and chat)."""
     run_applescript(
         'tell application "System Events" to keystroke "," using command down',
+    )
+
+
+def dismiss_settings_escape() -> bool:
+    """Dismiss the in-app Settings sheet (Escape). Does not use ⌘,."""
+    return run_applescript(
+        "tell application \"System Events\" to tell process \"Claude\"",
+        "set frontmost to true",
+        "key code 53",
+        "end tell",
     )
