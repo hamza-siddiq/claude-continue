@@ -1,0 +1,80 @@
+# claude-continuer
+
+macOS CLI tool that continues Claude Desktop **Code** sessions on a schedule. When a session time limit is reached, run this tool at a clock time you choose—it activates Claude, opens the **Code** sidebar tab, selects the first chat under **Recents**, types `continue`, and presses Enter.
+
+## Requirements
+
+- macOS 13+
+- Python 3.10+
+- [Claude Desktop](https://claude.ai/download) installed at `/Applications/Claude.app`
+- **Accessibility** permission for the terminal running this tool (Terminal, iTerm, or Cursor)
+
+## Install
+
+```bash
+cd /Users/hamza/Documents/Projects/GitHub/claude-continuer
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+## Permissions
+
+1. Open **System Settings → Privacy & Security → Accessibility**
+2. Enable your terminal app (e.g. Terminal, iTerm, or Cursor)
+3. On first run, macOS may ask to allow controlling **Claude**—allow it
+
+### Verify
+
+With Claude open:
+
+```bash
+claude-continuer inspect --depth 6
+```
+
+You should see elements with titles like `Code` and `Recents` in the output.
+
+## Usage
+
+Run immediately (for testing):
+
+```bash
+claude-continuer continue --now
+```
+
+Wait until a clock time, then run once:
+
+```bash
+claude-continuer continue --at "4:20pm"
+claude-continuer continue --at "7:30 am"
+claude-continuer continue --at "16:20"
+```
+
+If the time has already passed today, the tool waits until **the same time tomorrow**. Use `--today-only` to fail instead:
+
+```bash
+claude-continuer continue --at "4:20pm" --today-only
+```
+
+Debug the UI tree:
+
+```bash
+claude-continuer inspect --depth 8
+```
+
+## What it does (continue mode)
+
+1. Launch and focus Claude Desktop
+2. Click **Code** in the sidebar (not Chat or Cowork)
+3. Click the first chat under **Recents**
+4. Type `continue` in the composer and press Enter
+
+## Limitations
+
+- UI labels must match the English Claude app (`Code`, `Recents`)
+- Claude UI updates may break element matching—use `inspect` to tune selectors
+- Automation is inherently fragile; test with `--now` before relying on a schedule
+
+## License
+
+MIT

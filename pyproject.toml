@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-continuer"
+version = "0.1.0"
+description = "Scheduled macOS automation to continue Claude Code sessions when time limits hit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "atomacos>=3.3.0",
+    "pyobjc-framework-ApplicationServices>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
+
+[project.scripts]
+claude-continuer = "claude_continuer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
