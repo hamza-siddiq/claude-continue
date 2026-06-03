@@ -67,9 +67,9 @@ claude-continuer inspect --depth 8
 ## What it does (continue mode)
 
 1. Launch and focus Claude Desktop
-2. Click **Code** in the sidebar (not Chat or Cowork)
-3. Click the first chat under **Recents**
-4. Type `continue` in the composer and press Enter
+2. Switch to the **Code** sidebar tab if you are on Chat or Cowork (detected via the top nav pills)
+3. Click the first chat under **Recents** in Code
+4. Type `continue` in the Code **Prompt** field and press Enter (not the Chat composer)
 
 ## Limitations
 
