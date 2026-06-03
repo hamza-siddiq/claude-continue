@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from typing import Any
+from typing import Any, Literal
 
 import atomacos
 from atomacos import keyboard as ax_keyboard
@@ -24,14 +24,22 @@ SIDEBAR_CODE = "Code"
 SIDEBAR_CHAT = "Chat"
 SIDEBAR_COWORK = "Cowork"
 SIDEBAR_RECENTS = "Recents"
+SIDEBAR_PINNED = "Pinned"
 MESSAGE_TEXT = "continue"
+
+SidebarTab = Literal["Chat", "Code"]
+ContinueTarget = Literal["code", "chat"]
 
 SIDEBAR_PILL_CLASS = "df-pill"
 CODE_COMPOSER_DESCRIPTION = "Prompt"
 CHAT_COMPOSER_HINT = "write your prompt"
 
-SKIP_RECENT_LABELS = frozenset(
+SIDEBAR_MAX_X = 450
+
+# Section headers and nav; pinned chats above Recents are excluded via y > recents_y.
+SKIP_SIDEBAR_LABELS = frozenset(
     {
+        "pinned",
         "recents",
         "new session",
         "routines",
@@ -120,50 +128,56 @@ def is_sidebar_tab_active(tab: Any) -> bool:
     return get_attr(tab, "AXARIACurrent") == "page"
 
 
-def ensure_code_tab(app: Any) -> None:
-    """Switch from Chat or Cowork to the Code sidebar tab if needed."""
+def _find_recents_y(app: Any) -> float:
+    for element in app.findAllR(AXRole="AXButton"):
+        if _matches_label(element, SIDEBAR_RECENTS):
+            return _element_y(element)
+    raise RuntimeError(f'"{SIDEBAR_RECENTS}" section not found in sidebar')
+
+
+def ensure_tab(app: Any, tab: SidebarTab) -> None:
+    """Switch to Chat or Code via top nav pills if another tab is active."""
 
     def _ensure() -> None:
-        code_tab = find_sidebar_tab(app, SIDEBAR_CODE)
-        if code_tab is None:
-            raise RuntimeError('Sidebar tab "Code" not found')
+        target = find_sidebar_tab(app, tab)
+        if target is None:
+            raise RuntimeError(f'Sidebar tab "{tab}" not found')
 
-        if is_sidebar_tab_active(code_tab):
+        if is_sidebar_tab_active(target):
             return
 
-        press_element(code_tab)
+        press_element(target)
         time.sleep(0.8)
 
-        code_tab = find_sidebar_tab(app, SIDEBAR_CODE) or code_tab
-        if is_sidebar_tab_active(code_tab):
+        target = find_sidebar_tab(app, tab) or target
+        if is_sidebar_tab_active(target):
             return
 
-        press_element(code_tab)
+        press_element(target)
         time.sleep(0.8)
 
-        if not is_sidebar_tab_active(code_tab):
+        if not is_sidebar_tab_active(target):
             active = []
             for name in (SIDEBAR_CHAT, SIDEBAR_COWORK, SIDEBAR_CODE):
-                tab = find_sidebar_tab(app, name)
-                if tab and is_sidebar_tab_active(tab):
+                pill = find_sidebar_tab(app, name)
+                if pill and is_sidebar_tab_active(pill):
                     active.append(name)
             raise RuntimeError(
-                f'Could not switch to Code tab (still on: {", ".join(active) or "unknown"})'
+                f'Could not switch to {tab} tab (still on: {", ".join(active) or "unknown"})'
             )
 
-    retry(_ensure, description="switch to Code tab")
+    retry(_ensure, description=f"switch to {tab} tab")
 
 
-def click_first_recent_chat(app: Any) -> None:
+def click_first_recent_chat(app: Any, *, tab: SidebarTab) -> None:
+    """Open the first chat below Recents; skip Pinned section above Recents."""
+
     def _click() -> None:
-        ensure_code_tab(app)
+        ensure_tab(app, tab)
         time.sleep(0.4)
 
-        recents_y: float | None = None
-        for element in app.findAllR(AXRole="AXButton"):
-            if _matches_label(element, SIDEBAR_RECENTS):
-                recents_y = _element_y(element)
-                break
+        # Pinned chats sit above the Recents header (y <= recents_y); only take y > recents_y.
+        recents_y = _find_recents_y(app)
 
         chats: list[tuple[float, Any, str]] = []
         for element in app.findAllR(AXRole="AXButton"):
@@ -171,18 +185,18 @@ def click_first_recent_chat(app: Any) -> None:
             if not title:
                 continue
             normalized = title.strip().lower()
-            if normalized in SKIP_RECENT_LABELS:
+            if normalized in SKIP_SIDEBAR_LABELS:
                 continue
             y = _element_y(element)
-            if recents_y is not None and y <= recents_y:
+            if y <= recents_y:
                 continue
-            if _element_x(element) > 450:
+            if _element_x(element) > SIDEBAR_MAX_X:
                 continue
             chats.append((y, element, title))
 
         chats.sort(key=lambda item: item[0])
         if not chats:
-            raise RuntimeError("No recent Code chats found under Recents")
+            raise RuntimeError(f"No recent {tab} chats found under Recents")
         press_element(chats[0][1])
         time.sleep(0.5)
 
@@ -225,16 +239,35 @@ def find_code_composer(app: Any) -> Any | None:
     return max(candidates, key=_element_y)
 
 
-def send_continue_message(app: Any) -> None:
+def find_chat_composer(app: Any) -> Any | None:
+    """Chat tab composer ('Write your prompt…')."""
+    for role in ("AXTextArea", "AXTextField"):
+        for element in app.findAllR(AXRole=role):
+            desc = get_attr(element, "AXDescription").lower()
+            if CHAT_COMPOSER_HINT in desc:
+                return element
+    return app.findFirstR(AXRole="AXTextArea")
+
+
+def _find_composer(app: Any, tab: SidebarTab) -> Any | None:
+    if tab == "Code":
+        return find_code_composer(app)
+    return find_chat_composer(app)
+
+
+def send_continue_message(app: Any, *, tab: SidebarTab) -> None:
     def _send() -> None:
-        ensure_code_tab(app)
         time.sleep(0.3)
 
-        composer = find_code_composer(app)
+        composer = _find_composer(app, tab)
         if composer is None:
+            if tab == "Code":
+                hint = "Prompt field"
+            else:
+                hint = f'composer containing "{CHAT_COMPOSER_HINT}"'
             raise RuntimeError(
-                "Code tab composer not found (looked for Prompt field). "
-                "Are you on the Code tab with a session open?"
+                f"{tab} tab composer not found (looked for {hint}). "
+                f"Are you on the {tab} tab with a session open?"
             )
 
         press_element(composer)
@@ -245,3 +278,7 @@ def send_continue_message(app: Any) -> None:
         _press_return()
 
     retry(_send, description="send continue message")
+
+
+def target_to_sidebar_tab(target: ContinueTarget) -> SidebarTab:
+    return "Code" if target == "code" else "Chat"
