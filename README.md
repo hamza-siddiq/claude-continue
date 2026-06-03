@@ -50,6 +50,8 @@ claude-continuer continue --at "7:30 am"
 claude-continuer continue --at "16:20"
 ```
 
+`--at` uses **minute precision** (seconds are ignored). Schedule at least one minute ahead of the current time.
+
 If the time has already passed today, the tool waits until **the same time tomorrow**. Use `--today-only` to fail instead:
 
 ```bash
