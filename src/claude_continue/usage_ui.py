@@ -48,6 +48,10 @@ SETTINGS_NAV_LABELS = frozenset(
     }
 )
 
+# Roles that often wrap a nav label in Electron settings.
+_SETTINGS_NAV_ROLES = ("AXButton", "AXLink", "AXGroup", "AXRow", "AXListItem", "AXCell")
+_PRESSABLE_ROLES = _SETTINGS_NAV_ROLES + ("AXMenuItem",)
+
 
 def _collect_text_rows(app: Any) -> list[tuple[float, str]]:
     rows: list[tuple[float, str]] = []
@@ -71,59 +75,143 @@ def _is_usage_page_visible(app: Any) -> bool:
 def _direct_labels(element: Any) -> set[str]:
     """Labels on this element only (not descendant text)."""
     found: set[str] = set()
-    for attr in ("AXTitle", "AXDescription", "AXValue"):
+    for attr in ("AXTitle", "AXDescription", "AXValue", "AXIdentifier"):
         value = get_attr(element, attr).strip()
         if value:
             found.add(value.casefold())
     return found
 
 
+def _settings_nav_x_bounds(app: Any) -> tuple[float, float]:
+    """Horizontal band of the Settings left nav (not the main Chat/Code sidebar)."""
+    xs: list[float] = []
+    for role in ("AXButton", "AXLink", "AXStaticText", "AXGroup") + _SETTINGS_NAV_ROLES:
+        for element in app.findAllR(AXRole=role):
+            label = _element_label(element).casefold()
+            if label not in SETTINGS_NAV_LABELS:
+                continue
+            xs.append(_element_x(element))
+
+    if xs:
+        left = min(xs) - 40
+        right = max(xs) + 120
+        return left, right
+
+    # Settings sheet is usually right of the main sidebar; allow a wide band.
+    try:
+        windows = app.windows()
+        if windows:
+            width = float(windows[0].AXSize.width)
+            return width * 0.15, width * 0.55
+    except Exception:
+        pass
+    return 200.0, 900.0
+
+
+def _in_settings_nav_column(app: Any, element: Any) -> bool:
+    x = _element_x(element)
+    left, right = _settings_nav_x_bounds(app)
+    return left <= x <= right
+
+
+def _pressable_ancestor(element: Any, *, max_depth: int = 10) -> Any | None:
+    current: Any | None = element
+    for _ in range(max_depth):
+        if current is None:
+            return None
+        try:
+            if "Press" in current.getActions():
+                return current
+        except Exception:
+            pass
+        role = get_attr(current, "AXRole")
+        if role in _PRESSABLE_ROLES:
+            return current
+        current = getattr(current, "AXParent", None)
+    return None
+
+
+def _nav_label_matches(element: Any, name: str) -> bool:
+    want = name.casefold()
+    if _element_label(element).casefold() == want:
+        return True
+    return want in _direct_labels(element)
+
+
 def _is_settings_panel_open(app: Any) -> bool:
     """True when the in-app Settings sheet is open (any section)."""
     if _is_usage_page_visible(app):
         return True
-    for element in app.findAllR(AXRole="AXButton"):
-        if _element_x(element) > SIDEBAR_LEFT_X_MAX:
-            continue
-        if _direct_labels(element) & SETTINGS_NAV_LABELS:
-            return True
+    for role in _SETTINGS_NAV_ROLES:
+        for element in app.findAllR(AXRole=role):
+            if not _in_settings_nav_column(app, element):
+                continue
+            if _element_label(element).casefold() in SETTINGS_NAV_LABELS:
+                return True
     for _y, label in _collect_text_rows(app):
         if label.strip().lower() == "plan usage limits":
             return True
     return False
 
 
+def _settings_nav_y_for_label(app: Any, label: str) -> float | None:
+    want = label.casefold()
+    ys: list[float] = []
+    for role in ("AXStaticText",) + _SETTINGS_NAV_ROLES:
+        for element in app.findAllR(AXRole=role):
+            if _element_label(element).casefold() != want:
+                continue
+            if not _in_settings_nav_column(app, element):
+                continue
+            ys.append(_element_y(element))
+    return max(ys) if ys else None
+
+
 def _settings_nav_candidates(app: Any, name: str) -> list[tuple[float, Any]]:
-    """Buttons/links in the settings left nav with an exact label match."""
+    """Click targets for a settings nav item (e.g. Usage)."""
     want = name.casefold()
     found: list[tuple[float, Any]] = []
 
-    for role in ("AXButton", "AXLink"):
+    for role in ("AXStaticText",) + _SETTINGS_NAV_ROLES:
         for element in app.findAllR(AXRole=role):
-            if _element_x(element) > SIDEBAR_LEFT_X_MAX:
+            if not _nav_label_matches(element, name):
                 continue
-            if want not in _direct_labels(element):
+            if not _in_settings_nav_column(app, element):
                 continue
-            found.append((_element_y(element), element))
-
-    for element in app.findAllR(AXRole="AXStaticText"):
-        if want not in _direct_labels(element):
-            continue
-        if _element_x(element) > SIDEBAR_LEFT_X_MAX:
-            continue
-        parent = getattr(element, "AXParent", None)
-        if parent is None:
-            continue
-        if get_attr(parent, "AXRole") not in ("AXButton", "AXLink"):
-            continue
-        if _element_x(parent) > SIDEBAR_LEFT_X_MAX:
-            continue
-        found.append((_element_y(element), parent))
+            target = _pressable_ancestor(element) or element
+            found.append((_element_y(element), target))
 
     unique: dict[int, tuple[float, Any]] = {}
     for y, element in found:
         unique[id(element)] = (y, element)
-    return sorted(unique.values(), key=lambda item: item[0])
+    candidates = sorted(unique.values(), key=lambda item: item[0])
+
+    if want == "usage":
+        general_y = _settings_nav_y_for_label(app, "General")
+        if general_y is not None:
+            below = [(y, el) for y, el in candidates if y > general_y + 4]
+            if below:
+                candidates = below
+
+    return candidates
+
+
+def _click_at_element_center(element: Any) -> None:
+    """Click the center of an element via System Events (Electron fallback)."""
+    pos = element.AXPosition
+    size = element.AXSize
+    x = int(pos.x + size.width / 2)
+    y = int(pos.y + size.height / 2)
+    keystroke_in_claude(
+        f'tell application "System Events" to click at {{{x}, {y}}}',
+    )
+
+
+def _activate_element(element: Any) -> None:
+    try:
+        press_element(element)
+    except Exception:
+        _click_at_element_center(element)
 
 
 def _click_settings_nav(app: Any, name: str) -> bool:
@@ -132,12 +220,12 @@ def _click_settings_nav(app: Any, name: str) -> bool:
     if not candidates:
         return False
 
-    # Usage sits below General in the nav; try lower items first to avoid mis-clicks.
+    # Usage sits below General; try lower on screen first.
     ordered = sorted(candidates, key=lambda item: item[0], reverse=(name.casefold() == "usage"))
 
     for _y, element in ordered:
-        press_element(element)
-        time.sleep(0.8)
+        _activate_element(element)
+        time.sleep(0.9)
         refreshed = _refresh_app_ref()
         if name.casefold() == "usage":
             if _is_usage_page_visible(refreshed):
@@ -145,6 +233,24 @@ def _click_settings_nav(app: Any, name: str) -> bool:
             continue
         return True
     return False
+
+
+def dump_settings_nav(app: Any) -> None:
+    """Print settings nav click targets (for `claude-continue inspect --settings-nav`)."""
+    left, right = _settings_nav_x_bounds(app)
+    print(f"Settings nav x band: {left:.0f} … {right:.0f}")
+    print(f"Settings open: {_is_settings_panel_open(app)}")
+    print(f"Usage page visible: {_is_usage_page_visible(app)}\n")
+
+    for label in ("General", "Usage", "Profile", "Billing"):
+        candidates = _settings_nav_candidates(app, label)
+        print(f"{label}: {len(candidates)} candidate(s)")
+        for y, element in candidates:
+            role = get_attr(element, "AXRole")
+            print(
+                f"  y={y:6.0f} x={_element_x(element):6.0f}  role={role}  "
+                f"label={_element_label(element)!r}  direct={_direct_labels(element)!r}",
+            )
 
 
 def _click_labeled(app: Any, label: str, *, prefer_roles: tuple[str, ...] | None = None) -> None:

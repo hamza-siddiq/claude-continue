@@ -29,7 +29,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    return run_inspect(max_depth=args.depth, sidebar=args.sidebar, usage=args.usage)
+    return run_inspect(
+        max_depth=args.depth,
+        sidebar=args.sidebar,
+        usage=args.usage,
+        settings_nav=args.settings_nav,
+    )
 
 
 def _make_run_parser(
@@ -87,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         "--usage",
         action="store_true",
         help="Open Settings → Usage and print detected limits (debug)",
+    )
+    inspect_parser.add_argument(
+        "--settings-nav",
+        action="store_true",
+        help="List Settings sidebar nav targets (open Settings first)",
     )
     inspect_parser.set_defaults(func=_cmd_inspect)
 

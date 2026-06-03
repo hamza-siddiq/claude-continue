@@ -56,12 +56,32 @@ def _dump_sidebar_candidates(app: Any) -> None:
             )
 
 
-def run_inspect(*, max_depth: int = 6, sidebar: bool = False, usage: bool = False) -> int:
+def run_inspect(
+    *,
+    max_depth: int = 6,
+    sidebar: bool = False,
+    usage: bool = False,
+    settings_nav: bool = False,
+) -> int:
     try:
         app = get_app_ref()
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if settings_nav:
+        from claude_continue.ax import enable_manual_accessibility, find_running_app
+        from claude_continue.claude_app import BUNDLE_ID, _refresh_app_ref
+        from claude_continue.usage_ui import dump_settings_nav
+
+        running = find_running_app(BUNDLE_ID)
+        if running is not None:
+            enable_manual_accessibility(running.processIdentifier())
+        dump_settings_nav(_refresh_app_ref())
+        print(
+            "\nTip: open Claude → Settings (⌘,) and leave it on General, then re-run.",
+        )
+        return 0
 
     if usage:
         from claude_continue.usage_ui import (
