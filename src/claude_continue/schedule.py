@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import re
+import sys
 import time
 from datetime import datetime, timedelta
 
+from claude_continue.power import (
+    CAFFEINATE_LEAD_SECONDS,
+    MIN_WAKE_SCHEDULE_SECONDS,
+    WAKE_LEAD_SECONDS,
+    format_wait_duration,
+    notify_resume_after_sleep,
+    prevent_idle_sleep,
+    try_schedule_relative_wake,
+)
 
 _TIME_RE = re.compile(
     r"^\s*"
@@ -65,9 +75,53 @@ def next_run_at(
     return candidate
 
 
+def _wake_seconds_before_target(remaining: float) -> float:
+    """Seconds from now until we want the system to wake (before final caffeinate)."""
+    return max(WAKE_LEAD_SECONDS, remaining - CAFFEINATE_LEAD_SECONDS)
+
+
 def sleep_until(target: datetime) -> None:
+    """Block until `target`, allowing the Mac to sleep most of the wait.
+
+    Does not keep the Mac awake for the whole wait. When far from the target,
+    requests a one-time system wake via pmset (best-effort). In the last few
+    minutes, uses caffeinate so an awake Mac does not idle-sleep. After system
+    sleep, resumes when the process runs again; if the target passed during
+    sleep, returns immediately.
+    """
+    wake_requested = False
+    last_tick = datetime.now()
+
     while True:
-        remaining = (target - datetime.now()).total_seconds()
+        now = datetime.now()
+        remaining = (target - now).total_seconds()
         if remaining <= 0:
             return
-        time.sleep(min(remaining, 60))
+
+        tick_gap = (now - last_tick).total_seconds()
+        if tick_gap > 90:
+            notify_resume_after_sleep()
+            wake_requested = False
+
+        if (
+            not wake_requested
+            and remaining >= MIN_WAKE_SCHEDULE_SECONDS
+        ):
+            wake_in = _wake_seconds_before_target(remaining)
+            if try_schedule_relative_wake(wake_in):
+                print(
+                    f"Scheduled system wake in {format_wait_duration(wake_in)} "
+                    f"(Mac may sleep until then).",
+                    file=sys.stderr,
+                )
+                wake_requested = True
+
+        if remaining <= CAFFEINATE_LEAD_SECONDS:
+            prevent_idle_sleep(remaining)
+            while (target - datetime.now()).total_seconds() > 0:
+                time.sleep(0.25)
+            return
+
+        last_tick = now
+        chunk = min(remaining - CAFFEINATE_LEAD_SECONDS, 60)
+        time.sleep(max(chunk, 0.25))

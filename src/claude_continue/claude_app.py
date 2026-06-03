@@ -60,10 +60,13 @@ SKIP_SIDEBAR_LABELS = frozenset(
 CHAT_ROW_ROLES = ("AXButton", "AXLink", "AXRow", "AXCell")
 
 
-def launch_if_needed() -> None:
+def launch_if_needed(*, foreground: bool = False) -> None:
     if find_running_app(BUNDLE_ID):
         return
-    subprocess.run(["open", "-gj", "-a", APP_NAME], check=True)
+    if foreground:
+        subprocess.run(["open", "-a", APP_NAME], check=True)
+    else:
+        subprocess.run(["open", "-gj", "-a", APP_NAME], check=True)
     for _ in range(30):
         if find_running_app(BUNDLE_ID):
             return
@@ -125,7 +128,7 @@ def _refresh_app_ref() -> Any:
             activate()
             time.sleep(0.1)
             continue
-        launch_if_needed()
+        launch_if_needed(foreground=True)
         activate()
         time.sleep(0.15)
     raise RuntimeError(
@@ -173,7 +176,7 @@ def wait_for_sidebar_ready(app: Any) -> Any:
 
 
 def get_app_ref() -> Any:
-    launch_if_needed()
+    launch_if_needed(foreground=True)
     activate()
     running = find_running_app(BUNDLE_ID)
     if running is None:
