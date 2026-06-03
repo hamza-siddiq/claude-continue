@@ -107,10 +107,30 @@ def _element_x(element: Any) -> float:
 
 
 def _refresh_app_ref() -> Any:
-    app = atomacos.getAppRefByBundleId(BUNDLE_ID)
-    if app is None:
-        raise RuntimeError("Could not get accessibility reference for Claude")
-    return app
+    """
+    Return a live AX reference to Claude.
+
+    During Settings transitions the bundle can briefly disappear from
+    NSRunningApplication; retry instead of failing mid-poll.
+    """
+    last_error: Exception | None = None
+    for attempt in range(8):
+        try:
+            app = atomacos.getAppRefByBundleId(BUNDLE_ID)
+            if app is not None:
+                return app
+        except ValueError as exc:
+            last_error = exc
+        if attempt == 0 and find_running_app(BUNDLE_ID) is not None:
+            activate()
+            time.sleep(0.1)
+            continue
+        launch_if_needed()
+        activate()
+        time.sleep(0.15)
+    raise RuntimeError(
+        "Could not get accessibility reference for Claude. Is Claude Desktop running?"
+    ) from last_error
 
 
 def _is_top_nav_pill_candidate(element: Any) -> bool:
@@ -167,22 +187,12 @@ def get_app_ref() -> Any:
 def get_app_ref_for_usage() -> Any:
     """AX ref for Settings/Usage — does not require Chat/Code sidebar (home screen ok)."""
     launch_if_needed()
-    activate()
+    activate_claude()
     running = find_running_app(BUNDLE_ID)
     if running is None:
         raise RuntimeError("Claude is not running")
-    pid = running.processIdentifier()
-    enable_manual_accessibility(pid)
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
-        app = _refresh_app_ref()
-        try:
-            if app.windows():
-                return app
-        except Exception:
-            pass
-        enable_manual_accessibility(pid)
-        time.sleep(0.4)
+    enable_manual_accessibility(running.processIdentifier())
+    time.sleep(0.15)
     return _refresh_app_ref()
 
 
