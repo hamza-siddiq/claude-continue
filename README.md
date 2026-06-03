@@ -28,7 +28,7 @@ pip install -e .
 
 ### Automatic scheduling (default)
 
-With no flags, the tool opens the bottom sidebar menu → **Settings** → **Usage**, then:
+With no flags, the tool presses **⌘,** to open Settings, clicks **Usage** in the main settings sidebar (above the **Desktop app** section — see screenshots below), then:
 
 | Usage state | When it runs continue |
 |-------------|------------------------|
@@ -57,13 +57,25 @@ claude-continue chat --at "7:30 am"
 ```bash
 claude-continue inspect --depth 10
 claude-continue inspect --sidebar
+claude-continue inspect --settings-nav
 claude-continue inspect --usage
 ```
+
+## UI reference
+
+Claude Desktop layout this tool expects (screenshots in the repo root):
+
+| File | What it shows |
+|------|----------------|
+| [Home.png](Home.png) | Chat home with usage banner (`Usage limit reached • Resets …`) |
+| [Settings.png](Settings.png) | Settings after **⌘,** — default tab is **Desktop app → General**; **Usage** is in the upper nav (General … Billing → **Usage** → Capabilities …) |
+
+The automation always opens Settings with **⌘,**, then selects **Usage** in that upper list (not the second **General** under **Desktop app**).
 
 ## What it does
 
 1. Launch and focus Claude Desktop
-2. Open **Settings → Usage** (via the bottom sidebar menu) unless `--at` is set
+2. Open **Settings → Usage** (**⌘,** then **Usage** in the main nav) unless `--at` is set
 3. Schedule from usage bars, or use `--at`
 4. Switch to **Code** or **Chat**
 5. Click the first chat below **Recents** (skip **Pinned**)
