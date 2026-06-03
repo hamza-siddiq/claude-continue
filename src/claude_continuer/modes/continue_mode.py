@@ -12,10 +12,10 @@ def run_continue() -> int:
         print("Launching / activating Claude...")
         app = claude_app.get_app_ref()
 
-        print('Switching to "Code" tab...')
-        claude_app.click_sidebar_item(app, claude_app.SIDEBAR_CODE)
+        print('Switching to "Code" tab (from Chat/Cowork if needed)...')
+        claude_app.ensure_code_tab(app)
 
-        print("Selecting first chat in Recents...")
+        print("Selecting first Code chat in Recents...")
         claude_app.click_first_recent_chat(app)
 
         print('Sending "continue"...')

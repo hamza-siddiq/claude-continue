@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import atomacos
+from atomacos import keyboard as ax_keyboard
 
 from claude_continuer.ax import (
     enable_manual_accessibility,
@@ -20,8 +21,26 @@ BUNDLE_ID = "com.anthropic.claudefordesktop"
 APP_NAME = "Claude"
 
 SIDEBAR_CODE = "Code"
+SIDEBAR_CHAT = "Chat"
+SIDEBAR_COWORK = "Cowork"
 SIDEBAR_RECENTS = "Recents"
 MESSAGE_TEXT = "continue"
+
+SIDEBAR_PILL_CLASS = "df-pill"
+CODE_COMPOSER_DESCRIPTION = "Prompt"
+CHAT_COMPOSER_HINT = "write your prompt"
+
+SKIP_RECENT_LABELS = frozenset(
+    {
+        "recents",
+        "new session",
+        "routines",
+        "customize",
+        "chat",
+        "cowork",
+        "code",
+    }
+)
 
 
 def launch_if_needed() -> None:
@@ -66,95 +85,163 @@ def _matches_label(element: Any, label: str) -> bool:
     return False
 
 
-def find_by_label(app: Any, label: str) -> Any | None:
-    return app.findFirstR(
-        AXTitle=label,
-        AXDescription=label,
-    ) or app.findFirstR(AXTitle=label) or app.findFirstR(AXDescription=label)
+def _is_sidebar_pill(element: Any) -> bool:
+    classes = getattr(element, "AXDOMClassList", None) or []
+    if isinstance(classes, str):
+        return SIDEBAR_PILL_CLASS in classes
+    return SIDEBAR_PILL_CLASS in list(classes)
 
 
-def click_sidebar_item(app: Any, label: str) -> None:
-    def _click():
-        element = find_by_label(app, label)
-        if element is None:
-            candidates = app.findAllR(AXRole="AXButton") + app.findAllR(
-                AXRole="AXStaticText"
-            )
-            for candidate in candidates:
-                if _matches_label(candidate, label):
-                    element = candidate
-                    break
-        if element is None:
-            raise RuntimeError(f'Sidebar item "{label}" not found')
-        press_element(element)
-
-    retry(_click, description=f'click sidebar "{label}"')
+def _element_y(element: Any) -> float:
+    try:
+        return float(element.AXPosition.y)
+    except Exception:
+        return 0.0
 
 
-def _collect_rows(container: Any) -> list[Any]:
-    rows: list[Any] = []
-    for role in ("AXRow", "AXButton", "AXCell", "AXGroup"):
-        try:
-            rows.extend(container.findAllR(AXRole=role))
-        except Exception:
+def _element_x(element: Any) -> float:
+    try:
+        return float(element.AXPosition.x)
+    except Exception:
+        return 0.0
+
+
+def find_sidebar_tab(app: Any, label: str) -> Any | None:
+    """Top nav pill (Chat / Cowork / Code), not other 'Code' buttons in the UI."""
+    for element in app.findAllR(AXRole="AXButton"):
+        if not _is_sidebar_pill(element):
             continue
-    return rows
+        if _matches_label(element, label):
+            return element
+    return None
+
+
+def is_sidebar_tab_active(tab: Any) -> bool:
+    return get_attr(tab, "AXARIACurrent") == "page"
+
+
+def ensure_code_tab(app: Any) -> None:
+    """Switch from Chat or Cowork to the Code sidebar tab if needed."""
+
+    def _ensure() -> None:
+        code_tab = find_sidebar_tab(app, SIDEBAR_CODE)
+        if code_tab is None:
+            raise RuntimeError('Sidebar tab "Code" not found')
+
+        if is_sidebar_tab_active(code_tab):
+            return
+
+        press_element(code_tab)
+        time.sleep(0.8)
+
+        code_tab = find_sidebar_tab(app, SIDEBAR_CODE) or code_tab
+        if is_sidebar_tab_active(code_tab):
+            return
+
+        press_element(code_tab)
+        time.sleep(0.8)
+
+        if not is_sidebar_tab_active(code_tab):
+            active = []
+            for name in (SIDEBAR_CHAT, SIDEBAR_COWORK, SIDEBAR_CODE):
+                tab = find_sidebar_tab(app, name)
+                if tab and is_sidebar_tab_active(tab):
+                    active.append(name)
+            raise RuntimeError(
+                f'Could not switch to Code tab (still on: {", ".join(active) or "unknown"})'
+            )
+
+    retry(_ensure, description="switch to Code tab")
 
 
 def click_first_recent_chat(app: Any) -> None:
-    def _click():
-        recents = find_by_label(app, SIDEBAR_RECENTS)
-        if recents is None:
-            raise RuntimeError(f'"{SIDEBAR_RECENTS}" section not found')
+    def _click() -> None:
+        ensure_code_tab(app)
+        time.sleep(0.4)
 
-        parent = getattr(recents, "AXParent", None) or recents
-        rows = _collect_rows(parent)
-        if not rows:
-            window = app.windows()[0] if app.windows() else app
-            rows = _collect_rows(window)
+        recents_y: float | None = None
+        for element in app.findAllR(AXRole="AXButton"):
+            if _matches_label(element, SIDEBAR_RECENTS):
+                recents_y = _element_y(element)
+                break
 
-        clickable = []
-        for row in rows:
-            title = get_attr(row, "AXTitle") or get_attr(row, "AXDescription")
-            if not title or title.strip().lower() in (
-                "recents",
-                "code",
-                "chat",
-                "cowork",
-            ):
+        chats: list[tuple[float, Any, str]] = []
+        for element in app.findAllR(AXRole="AXButton"):
+            title = get_attr(element, "AXTitle") or get_attr(element, "AXDescription")
+            if not title:
                 continue
-            clickable.append(row)
+            normalized = title.strip().lower()
+            if normalized in SKIP_RECENT_LABELS:
+                continue
+            y = _element_y(element)
+            if recents_y is not None and y <= recents_y:
+                continue
+            if _element_x(element) > 450:
+                continue
+            chats.append((y, element, title))
 
-        if not clickable:
-            raise RuntimeError("No recent chats found under Recents")
-        press_element(clickable[0])
+        chats.sort(key=lambda item: item[0])
+        if not chats:
+            raise RuntimeError("No recent Code chats found under Recents")
+        press_element(chats[0][1])
+        time.sleep(0.5)
 
     retry(_click, description="select first recent chat")
 
 
+def _press_return() -> None:
+    """Submit via Return; AXValue + element sendKeys often skip Enter."""
+    ax_keyboard.press("return")
+    time.sleep(0.1)
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            'tell application "System Events" to key code 36',  # Return
+        ],
+        check=False,
+    )
+
+
+def find_code_composer(app: Any) -> Any | None:
+    """Code tab composer ('Prompt'), not the Chat tab ('Write your prompt…')."""
+    composer = app.findFirstR(
+        AXRole="AXTextArea", AXDescription=CODE_COMPOSER_DESCRIPTION
+    )
+    if composer is not None:
+        return composer
+
+    candidates: list[Any] = []
+    for role in ("AXTextArea", "AXTextField"):
+        for element in app.findAllR(AXRole=role):
+            desc = get_attr(element, "AXDescription").lower()
+            if CHAT_COMPOSER_HINT in desc:
+                continue
+            if "prompt" in desc or CODE_COMPOSER_DESCRIPTION.lower() in desc:
+                candidates.append(element)
+
+    if not candidates:
+        return None
+    return max(candidates, key=_element_y)
+
+
 def send_continue_message(app: Any) -> None:
-    def _send():
-        composer = (
-            app.findFirstR(AXRole="AXTextArea")
-            or app.findFirstR(AXRole="AXTextField")
-            or app.findFirstR(AXRole="AXComboBox")
-        )
+    def _send() -> None:
+        ensure_code_tab(app)
+        time.sleep(0.3)
+
+        composer = find_code_composer(app)
         if composer is None:
-            raise RuntimeError("Message composer not found")
+            raise RuntimeError(
+                "Code tab composer not found (looked for Prompt field). "
+                "Are you on the Code tab with a session open?"
+            )
 
-        try:
-            composer.AXFocus = True
-        except Exception:
-            press_element(composer)
+        press_element(composer)
+        time.sleep(0.25)
 
+        composer.sendKeys(MESSAGE_TEXT)
         time.sleep(0.2)
-
-        try:
-            composer.AXValue = MESSAGE_TEXT
-        except Exception:
-            composer.sendKeys(MESSAGE_TEXT)
-
-        time.sleep(0.15)
-        composer.sendKeys("\r")
+        _press_return()
 
     retry(_send, description="send continue message")
