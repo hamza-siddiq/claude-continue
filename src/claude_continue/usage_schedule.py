@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from typing import Literal
 
-from claude_continue.claude_app import get_app_ref
+from claude_continue.claude_app import get_app_ref_for_usage
 from claude_continue.schedule import sleep_until
 from claude_continue.usage_parse import (
     UsageNotLimitedError,
@@ -44,7 +44,7 @@ def resolve_run_time_from_usage(*, manual_at: str | None = None) -> datetime | S
         hour, minute = parse_time_string(manual_at)
         return next_run_at(hour, minute)
 
-    app = get_app_ref()
+    app = get_app_ref_for_usage()
     app = open_usage_page(app)
     app = wait_for_usage_rows(app)
     try:

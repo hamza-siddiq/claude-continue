@@ -63,24 +63,30 @@ def run_inspect(
     usage: bool = False,
     settings_nav: bool = False,
 ) -> int:
-    try:
-        app = get_app_ref()
-    except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+    if settings_nav or usage:
+        from claude_continue.claude_app import get_app_ref_for_usage
+
+        try:
+            app = get_app_ref_for_usage()
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            app = get_app_ref()
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
     if settings_nav:
-        from claude_continue.ax import enable_manual_accessibility, find_running_app
-        from claude_continue.claude_app import BUNDLE_ID, _refresh_app_ref
-        from claude_continue.usage_ui import dump_settings_nav
+        from claude_continue.usage_ui import _ensure_settings_open, dump_settings_nav
 
-        running = find_running_app(BUNDLE_ID)
-        if running is not None:
-            enable_manual_accessibility(running.processIdentifier())
-        dump_settings_nav(_refresh_app_ref())
-        print(
-            "\nTip: open Claude → Settings (⌘,) and leave it on General, then re-run.",
-        )
+        try:
+            app = _ensure_settings_open(app)
+            dump_settings_nav(app)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         return 0
 
     if usage:

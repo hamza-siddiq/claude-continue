@@ -164,6 +164,18 @@ def get_app_ref() -> Any:
     return wait_for_sidebar_ready(app)
 
 
+def get_app_ref_for_usage() -> Any:
+    """AX ref for Settings/Usage — does not require Chat/Code sidebar (home screen ok)."""
+    launch_if_needed()
+    activate()
+    running = find_running_app(BUNDLE_ID)
+    if running is None:
+        raise RuntimeError("Claude is not running")
+    enable_manual_accessibility(running.processIdentifier())
+    time.sleep(0.5)
+    return _refresh_app_ref()
+
+
 def is_sidebar_tab_active(tab: Any) -> bool:
     return get_attr(tab, "AXARIACurrent") == "page"
 

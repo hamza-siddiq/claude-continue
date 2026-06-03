@@ -42,11 +42,25 @@ def activate_claude() -> None:
         time.sleep(0.25)
 
 
-def keystroke_in_claude(*applescript_body: str) -> None:
-    """Run System Events keystrokes while Claude stays frontmost."""
+def run_applescript(*lines: str) -> bool:
+    """Run AppleScript lines; return True on success (errors are not printed)."""
     activate_claude()
     args = ["osascript", "-e", f'tell application "{APP_NAME}" to activate']
-    for line in applescript_body:
+    for line in lines:
         args.extend(["-e", line])
-    subprocess.run(args, check=False)
+    result = subprocess.run(args, capture_output=True, text=True)
     activate_claude()
+    return result.returncode == 0
+
+
+def keystroke_in_claude(*applescript_body: str) -> None:
+    """Run System Events keystrokes while Claude stays frontmost."""
+    run_applescript(*applescript_body)
+
+
+def open_settings_shortcut() -> None:
+    """Open Claude Settings via ⌘, (works from home screen and chat)."""
+    run_applescript(
+        "delay 0.15",
+        'tell application "System Events" to keystroke "," using command down',
+    )

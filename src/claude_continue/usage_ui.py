@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import time
 from typing import Any
 
@@ -12,7 +11,6 @@ from claude_continue.ax import (
     get_attr,
     press_element,
     retry,
-    show_menu,
 )
 from claude_continue.claude_app import (
     BUNDLE_ID,
@@ -23,12 +21,16 @@ from claude_continue.claude_app import (
     _matches_label,
     _refresh_app_ref,
 )
-from claude_continue.mac_focus import activate_claude, keystroke_in_claude
+from claude_continue.mac_focus import (
+    activate_claude,
+    keystroke_in_claude,
+    open_settings_shortcut,
+    run_applescript,
+)
 from claude_continue.usage_parse import UsageSnapshot
 
-# Bottom-left sidebar: profile / chevron (screen coords, not window-relative).
-SIDEBAR_BOTTOM_Y_MIN = 600
 SIDEBAR_LEFT_X_MAX = 400
+SETTINGS_OPEN_TIMEOUT_S = 12
 
 # Left nav inside the Settings panel (not the Chat/Code/Cowork pills).
 SETTINGS_NAV_LABELS = frozenset(
@@ -144,13 +146,19 @@ def _is_settings_panel_open(app: Any) -> bool:
         return True
     for role in _SETTINGS_NAV_ROLES:
         for element in app.findAllR(AXRole=role):
-            if not _in_settings_nav_column(app, element):
-                continue
             if _element_label(element).casefold() in SETTINGS_NAV_LABELS:
                 return True
     for _y, label in _collect_text_rows(app):
-        if label.strip().lower() == "plan usage limits":
+        low = label.strip().lower()
+        if low in ("plan usage limits", "general", "appearance", "desktop app"):
             return True
+    try:
+        for window in app.windows():
+            title = get_attr(window, "AXTitle").casefold()
+            if "setting" in title:
+                return True
+    except Exception:
+        pass
     return False
 
 
@@ -253,17 +261,6 @@ def dump_settings_nav(app: Any) -> None:
             )
 
 
-def _click_labeled(app: Any, label: str, *, prefer_roles: tuple[str, ...] | None = None) -> None:
-    roles = prefer_roles or ("AXMenuItem", "AXButton", "AXLink", "AXStaticText")
-    for role in roles:
-        for element in app.findAllR(AXRole=role):
-            if _matches_label(element, label):
-                press_element(element)
-                time.sleep(0.6)
-                return
-    raise RuntimeError(f'Could not find control labeled "{label}"')
-
-
 def _click_labeled_in_sidebar(app: Any, label: str) -> bool:
     """Click label in the left sidebar region; return True if found."""
     for role in ("AXMenuItem", "AXButton", "AXLink", "AXStaticText"):
@@ -278,69 +275,51 @@ def _click_labeled_in_sidebar(app: Any, label: str) -> bool:
     return False
 
 
-def _open_settings_via_menu_bar() -> None:
-    keystroke_in_claude(
-        'tell application "System Events" to tell process "Claude" to click '
-        'menu item "Settings…" of menu 1 of menu bar item "Claude" of menu bar 1',
+def _open_settings_via_menu_bar() -> bool:
+    """Menu bar fallback when ⌘, did not open Settings."""
+    for item in ("Settings…", "Settings...", "Settings"):
+        if run_applescript(
+            "delay 0.1",
+            "tell application \"System Events\" to tell process \"Claude\"",
+            f'click menu item "{item}" of menu 1 of menu bar item "Claude" of menu bar 1',
+            "end tell",
+        ):
+            return True
+    return False
+
+
+def _wait_for_settings_panel(app: Any, *, timeout: float = SETTINGS_OPEN_TIMEOUT_S) -> Any:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = _prepare_ax_tree(app)
+        if _is_settings_panel_open(current) or _is_usage_page_visible(current):
+            return current
+        time.sleep(0.4)
+    return _prepare_ax_tree(app)
+
+
+def _ensure_settings_open(app: Any) -> Any:
+    """Open in-app Settings (⌘, first — works on home screen)."""
+    current = _prepare_ax_tree(app)
+    if _is_settings_panel_open(current) or _is_usage_page_visible(current):
+        return current
+
+    activate_claude()
+    open_settings_shortcut()
+    time.sleep(0.9)
+    current = _wait_for_settings_panel(app)
+    if _is_settings_panel_open(current) or _is_usage_page_visible(current):
+        return current
+
+    if _open_settings_via_menu_bar():
+        time.sleep(0.9)
+        current = _wait_for_settings_panel(app)
+        if _is_settings_panel_open(current) or _is_usage_page_visible(current):
+            return current
+
+    raise RuntimeError(
+        "Could not open Settings. Click Claude, press ⌘, (Command+Comma), then retry."
     )
-    time.sleep(0.5)
-
-
-def _open_settings_via_keyboard() -> None:
-    keystroke_in_claude(
-        'tell application "System Events" to keystroke "," using command down',
-    )
-    time.sleep(0.5)
-
-
-def _find_profile_menu_control(app: Any) -> Any | None:
-    """Profile avatar or chevron at the bottom of the left sidebar."""
-    candidates: list[tuple[float, float, int, Any]] = []
-
-    for role in ("AXButton", "AXImage", "AXGroup"):
-        for element in app.findAllR(AXRole=role):
-            y = _element_y(element)
-            x = _element_x(element)
-            if y < SIDEBAR_BOTTOM_Y_MIN or x > SIDEBAR_LEFT_X_MAX:
-                continue
-            label = _element_label(element).lower()
-            if any(skip in label for skip in ("voice", "record", "extension", "file", "prompt")):
-                continue
-            try:
-                has_menu = "ShowMenu" in element.getActions()
-            except Exception:
-                has_menu = False
-            score = 0
-            if has_menu:
-                score += 10
-            if role == "AXImage":
-                score += 5
-            if role == "AXButton" and not label:
-                score += 3
-            if label and len(label) < 30 and label not in ("settings", "usage", "recents"):
-                score += 2
-            if score > 0 or (role == "AXImage" and y > SIDEBAR_BOTTOM_Y_MIN):
-                candidates.append((y, x, score, element))
-
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: (-item[2], -item[0], item[1]))
-    return candidates[0][3]
-
-
-def _open_bottom_account_menu(app: Any) -> None:
-    """Open the menu from the profile / arrow at the bottom of the sidebar."""
-    control = _find_profile_menu_control(app)
-    if control is None:
-        raise RuntimeError("Could not find bottom sidebar menu (profile / arrow)")
-    try:
-        if "ShowMenu" in control.getActions():
-            show_menu(control)
-        else:
-            press_element(control)
-    except Exception:
-        press_element(control)
-    time.sleep(0.8)
 
 
 def _prepare_ax_tree(app: Any) -> Any:
@@ -351,18 +330,11 @@ def _prepare_ax_tree(app: Any) -> Any:
     return _refresh_app_ref()
 
 
-def _navigate_to_usage(current: Any) -> Any:
-    current = _prepare_ax_tree(current)
+def _navigate_to_usage(app: Any) -> Any:
+    current = _ensure_settings_open(app)
 
     if _is_usage_page_visible(current):
         return current
-
-    if _is_settings_panel_open(current):
-        if _click_settings_nav(current, "Usage"):
-            time.sleep(0.8)
-            current = _refresh_app_ref()
-            if _is_usage_page_visible(current):
-                return current
 
     if _click_settings_nav(current, "Usage"):
         time.sleep(0.8)
@@ -370,43 +342,16 @@ def _navigate_to_usage(current: Any) -> Any:
         if _is_usage_page_visible(current):
             return current
 
-    if not _is_settings_panel_open(current):
-        if _click_labeled_in_sidebar(current, "Settings"):
-            time.sleep(0.8)
-            current = _refresh_app_ref()
-            if _click_settings_nav(current, "Usage"):
-                time.sleep(0.8)
-                current = _refresh_app_ref()
-                if _is_usage_page_visible(current):
-                    return current
-
-    _open_settings_via_keyboard()
-    current = _refresh_app_ref()
-    if not _is_usage_page_visible(current):
-        _click_settings_nav(current, "Usage")
-        time.sleep(0.8)
-        current = _refresh_app_ref()
-    if _is_usage_page_visible(current):
-        return current
-
-    _open_settings_via_menu_bar()
-    current = _refresh_app_ref()
-    if not _is_usage_page_visible(current):
-        _click_settings_nav(current, "Usage")
-        time.sleep(0.8)
-        current = _refresh_app_ref()
-
-    if not _is_usage_page_visible(current) and not _is_settings_panel_open(current):
-        _open_bottom_account_menu(current)
-        current = _refresh_app_ref()
-        _click_labeled(current, "Settings", prefer_roles=("AXMenuItem", "AXButton"))
-        current = _refresh_app_ref()
-        _click_settings_nav(current, "Usage")
+    current = _prepare_ax_tree(current)
+    if _click_settings_nav(current, "Usage"):
         time.sleep(0.8)
         current = _refresh_app_ref()
 
     if not _is_usage_page_visible(current):
-        raise RuntimeError("Usage page did not open (Plan usage limits not found)")
+        raise RuntimeError(
+            "Usage page did not open. Open Settings → Usage manually, or run "
+            "`claude-continue inspect --settings-nav` while Settings is open."
+        )
     return current
 
 
