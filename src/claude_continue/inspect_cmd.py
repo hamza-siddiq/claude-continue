@@ -32,12 +32,40 @@ def _dump(element: Any, depth: int, max_depth: int, indent: int) -> None:
         _dump(child, depth + 1, max_depth, indent + 1)
 
 
-def run_inspect(*, max_depth: int = 6) -> int:
+def _dump_sidebar_candidates(app: Any) -> None:
+    from claude_continue.claude_app import (
+        CHAT_ROW_ROLES,
+        _element_label,
+        _element_x,
+        _element_y,
+        _is_skipped_sidebar_label,
+        _sidebar_max_x,
+    )
+
+    max_x = _sidebar_max_x(app)
+    print(f"Sidebar candidates (x <= {max_x:.0f}):\n")
+    for role in CHAT_ROW_ROLES:
+        for element in app.findAllR(AXRole=role):
+            label = _element_label(element)
+            if not label:
+                continue
+            skipped = _is_skipped_sidebar_label(label)
+            print(
+                f"  {role:12} y={_element_y(element):6.0f} x={_element_x(element):6.0f}"
+                f"  skip={skipped}  {label[:60]!r}"
+            )
+
+
+def run_inspect(*, max_depth: int = 6, sidebar: bool = False) -> int:
     try:
         app = get_app_ref()
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if sidebar:
+        _dump_sidebar_candidates(app)
+        return 0
 
     windows = app.windows()
     if not windows:

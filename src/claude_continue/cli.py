@@ -26,7 +26,7 @@ def _cmd_continue(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    return run_inspect(max_depth=args.depth)
+    return run_inspect(max_depth=args.depth, sidebar=args.sidebar)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=6,
         help="Maximum tree depth (default: 6)",
+    )
+    inspect_parser.add_argument(
+        "--sidebar",
+        action="store_true",
+        help="List sidebar chat row candidates (for debugging Recents selection)",
     )
     inspect_parser.set_defaults(func=_cmd_inspect)
 

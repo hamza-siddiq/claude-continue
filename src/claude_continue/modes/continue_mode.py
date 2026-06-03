@@ -19,7 +19,7 @@ def run_continue(*, target: ContinueTarget = "code") -> int:
         claude_app.ensure_tab(app, tab)
 
         print(f"Selecting first {tab} chat in Recents (skipping Pinned)...")
-        claude_app.click_first_recent_chat(app, tab=tab)
+        app = claude_app.click_first_recent_chat(app, tab=tab)
 
         print('Sending "continue"...')
         claude_app.send_continue_message(app, tab=tab)

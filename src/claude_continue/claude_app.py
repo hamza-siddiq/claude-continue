@@ -34,7 +34,6 @@ SIDEBAR_PILL_CLASS = "df-pill"
 CODE_COMPOSER_DESCRIPTION = "Prompt"
 CHAT_COMPOSER_HINT = "write your prompt"
 
-SIDEBAR_MAX_X = 450
 # Top nav pill row (Chat / Cowork / Code) — used when df-pill is not exposed yet on cold start.
 SIDEBAR_PILL_Y_MIN = 150
 SIDEBAR_PILL_Y_MAX = 230
@@ -49,6 +48,7 @@ SKIP_SIDEBAR_LABELS = frozenset(
         "pinned",
         "recents",
         "new session",
+        "new chat",
         "routines",
         "customize",
         "chat",
@@ -56,6 +56,8 @@ SKIP_SIDEBAR_LABELS = frozenset(
         "code",
     }
 )
+
+CHAT_ROW_ROLES = ("AXButton", "AXLink", "AXRow", "AXCell")
 
 
 def launch_if_needed() -> None:
@@ -169,14 +171,130 @@ def is_sidebar_tab_active(tab: Any) -> bool:
     return get_attr(tab, "AXARIACurrent") == "page"
 
 
-def _find_recents_y(app: Any) -> float:
+def _element_label(element: Any) -> str:
+    for attr in ("AXTitle", "AXDescription", "AXValue"):
+        value = get_attr(element, attr)
+        if value and value.strip():
+            return value.strip()
+    try:
+        for child in element.AXChildren or []:
+            label = _element_label(child)
+            if label:
+                return label
+    except Exception:
+        pass
+    return ""
+
+
+def _sidebar_max_x(app: Any) -> float:
+    try:
+        windows = app.windows()
+        if windows:
+            return float(windows[0].AXSize.width) * 0.5
+    except Exception:
+        pass
+    return 600.0
+
+
+def _find_recents_element(app: Any) -> Any | None:
+    for role in ("AXButton", "AXStaticText", "AXGroup"):
+        for element in app.findAllR(AXRole=role):
+            if _matches_label(element, SIDEBAR_RECENTS):
+                return element
+    return None
+
+
+def _is_skipped_sidebar_label(label: str) -> bool:
+    return label.strip().lower() in SKIP_SIDEBAR_LABELS
+
+
+def _subtree_clickable_candidates(
+    root: Any, *, max_x: float, min_y: float
+) -> list[tuple[float, Any, str]]:
+    found: list[tuple[float, Any, str]] = []
+
+    def walk(node: Any) -> None:
+        role = get_attr(node, "AXRole")
+        label = _element_label(node)
+        if role in CHAT_ROW_ROLES and label and not _is_skipped_sidebar_label(label):
+            y, x = _element_y(node), _element_x(node)
+            if y > min_y and x <= max_x:
+                found.append((y, node, label))
+        try:
+            for child in node.AXChildren or []:
+                walk(child)
+        except Exception:
+            pass
+
+    walk(root)
+    return found
+
+
+def _collect_chats_after_recents(app: Any, recents: Any) -> list[tuple[float, Any, str]]:
+    """Prefer siblings after the Recents node in the sidebar list."""
+    max_x = _sidebar_max_x(app)
+    min_y = _element_y(recents)
+    parent = getattr(recents, "AXParent", None)
+    if parent is not None:
+        try:
+            children = list(parent.AXChildren or [])
+            idx = children.index(recents)
+        except (ValueError, TypeError):
+            idx = -1
+        if idx >= 0:
+            chats: list[tuple[float, Any, str]] = []
+            for sibling in children[idx + 1 :]:
+                chats.extend(
+                    _subtree_clickable_candidates(
+                        sibling, max_x=max_x, min_y=min_y - 1
+                    )
+                )
+            if chats:
+                chats.sort(key=lambda item: item[0])
+                return chats
+
+    return []
+
+
+def _collect_chats_below_recents_y(
+    app: Any, recents_y: float
+) -> list[tuple[float, Any, str]]:
+    max_x = _sidebar_max_x(app)
+    chats: list[tuple[float, Any, str]] = []
+    for role in CHAT_ROW_ROLES:
+        for element in app.findAllR(AXRole=role):
+            label = _element_label(element)
+            if not label or _is_skipped_sidebar_label(label):
+                continue
+            y = _element_y(element)
+            if y <= recents_y:
+                continue
+            if _element_x(element) > max_x:
+                continue
+            chats.append((y, element, label))
+    chats.sort(key=lambda item: item[0])
+    return chats
+
+
+def _wait_for_recent_chats(app: Any) -> tuple[Any, list[tuple[float, Any, str]]]:
+    """Poll until at least one chat appears below Recents."""
     deadline = time.monotonic() + UI_READY_TIMEOUT_S
     while time.monotonic() < deadline:
-        for element in app.findAllR(AXRole="AXButton"):
-            if _matches_label(element, SIDEBAR_RECENTS):
-                return _element_y(element)
+        current = _refresh_app_ref()
+        recents = _find_recents_element(current)
+        if recents is None:
+            time.sleep(UI_READY_POLL_S)
+            continue
+        chats = _collect_chats_after_recents(current, recents)
+        if not chats:
+            chats = _collect_chats_below_recents_y(current, _element_y(recents))
+        if chats:
+            return current, chats
         time.sleep(UI_READY_POLL_S)
-    raise RuntimeError(f'"{SIDEBAR_RECENTS}" section not found in sidebar')
+    raise RuntimeError(
+        "No recent chats found under Recents. "
+        "Ensure the Chat or Code tab has conversation history visible."
+    )
 
 
 def ensure_tab(app: Any, tab: SidebarTab) -> None:
@@ -210,41 +328,28 @@ def ensure_tab(app: Any, tab: SidebarTab) -> None:
                 f'Could not switch to {tab} tab (still on: {", ".join(active) or "unknown"})'
             )
 
+        running = find_running_app(BUNDLE_ID)
+        if running is not None:
+            enable_manual_accessibility(running.processIdentifier())
+        time.sleep(0.5)
+
     retry(_ensure, description=f"switch to {tab} tab")
 
 
-def click_first_recent_chat(app: Any, *, tab: SidebarTab) -> None:
+def click_first_recent_chat(app: Any, *, tab: SidebarTab) -> Any:
     """Open the first chat below Recents; skip Pinned section above Recents."""
 
+    refreshed = app
+
     def _click() -> None:
+        nonlocal refreshed
         ensure_tab(app, tab)
-        time.sleep(0.4)
-
-        # Pinned chats sit above the Recents header (y <= recents_y); only take y > recents_y.
-        recents_y = _find_recents_y(app)
-
-        chats: list[tuple[float, Any, str]] = []
-        for element in app.findAllR(AXRole="AXButton"):
-            title = get_attr(element, "AXTitle") or get_attr(element, "AXDescription")
-            if not title:
-                continue
-            normalized = title.strip().lower()
-            if normalized in SKIP_SIDEBAR_LABELS:
-                continue
-            y = _element_y(element)
-            if y <= recents_y:
-                continue
-            if _element_x(element) > SIDEBAR_MAX_X:
-                continue
-            chats.append((y, element, title))
-
-        chats.sort(key=lambda item: item[0])
-        if not chats:
-            raise RuntimeError(f"No recent {tab} chats found under Recents")
+        refreshed, chats = _wait_for_recent_chats(app)
         press_element(chats[0][1])
         time.sleep(0.5)
 
     retry(_click, description="select first recent chat")
+    return refreshed
 
 
 def _press_return() -> None:
