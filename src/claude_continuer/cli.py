@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
 
 from claude_continuer import __version__
 from claude_continuer.inspect_cmd import run_inspect
