@@ -22,7 +22,7 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         sleep_until(target)
         print("Scheduled time reached.")
 
-    return continue_mode.run_continue()
+    return continue_mode.run_continue(target=args.target)
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -39,7 +39,14 @@ def main(argv: list[str] | None = None) -> int:
 
     continue_parser = subparsers.add_parser(
         "continue",
-        help="Switch to Code, open first recent chat, send 'continue'",
+        help="Open first Recents chat on code or chat tab and send 'continue'",
+    )
+    continue_parser.add_argument(
+        "target",
+        nargs="?",
+        choices=["code", "chat"],
+        default="code",
+        help="which tab to use (default: code)",
     )
     continue_parser.add_argument(
         "--at",
