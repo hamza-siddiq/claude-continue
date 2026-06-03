@@ -68,6 +68,16 @@ def _is_usage_page_visible(app: Any) -> bool:
     return False
 
 
+def _direct_labels(element: Any) -> set[str]:
+    """Labels on this element only (not descendant text)."""
+    found: set[str] = set()
+    for attr in ("AXTitle", "AXDescription", "AXValue"):
+        value = get_attr(element, attr).strip()
+        if value:
+            found.add(value.casefold())
+    return found
+
+
 def _is_settings_panel_open(app: Any) -> bool:
     """True when the in-app Settings sheet is open (any section)."""
     if _is_usage_page_visible(app):
@@ -75,8 +85,7 @@ def _is_settings_panel_open(app: Any) -> bool:
     for element in app.findAllR(AXRole="AXButton"):
         if _element_x(element) > SIDEBAR_LEFT_X_MAX:
             continue
-        label = _element_label(element).strip().lower()
-        if label in SETTINGS_NAV_LABELS:
+        if _direct_labels(element) & SETTINGS_NAV_LABELS:
             return True
     for _y, label in _collect_text_rows(app):
         if label.strip().lower() == "plan usage limits":
@@ -84,20 +93,58 @@ def _is_settings_panel_open(app: Any) -> bool:
     return False
 
 
-def _click_usage_in_settings_sidebar(app: Any) -> bool:
-    candidates: list[tuple[float, Any]] = []
-    for element in app.findAllR(AXRole="AXButton"):
-        if not _matches_label(element, "Usage"):
+def _settings_nav_candidates(app: Any, name: str) -> list[tuple[float, Any]]:
+    """Buttons/links in the settings left nav with an exact label match."""
+    want = name.casefold()
+    found: list[tuple[float, Any]] = []
+
+    for role in ("AXButton", "AXLink"):
+        for element in app.findAllR(AXRole=role):
+            if _element_x(element) > SIDEBAR_LEFT_X_MAX:
+                continue
+            if want not in _direct_labels(element):
+                continue
+            found.append((_element_y(element), element))
+
+    for element in app.findAllR(AXRole="AXStaticText"):
+        if want not in _direct_labels(element):
             continue
         if _element_x(element) > SIDEBAR_LEFT_X_MAX:
             continue
-        candidates.append((_element_y(element), element))
+        parent = getattr(element, "AXParent", None)
+        if parent is None:
+            continue
+        if get_attr(parent, "AXRole") not in ("AXButton", "AXLink"):
+            continue
+        if _element_x(parent) > SIDEBAR_LEFT_X_MAX:
+            continue
+        found.append((_element_y(element), parent))
+
+    unique: dict[int, tuple[float, Any]] = {}
+    for y, element in found:
+        unique[id(element)] = (y, element)
+    return sorted(unique.values(), key=lambda item: item[0])
+
+
+def _click_settings_nav(app: Any, name: str) -> bool:
+    """Click a settings sidebar item (e.g. Usage), verifying Usage page when relevant."""
+    candidates = _settings_nav_candidates(app, name)
     if not candidates:
         return False
-    candidates.sort(key=lambda item: item[0])
-    press_element(candidates[0][1])
-    time.sleep(0.6)
-    return True
+
+    # Usage sits below General in the nav; try lower items first to avoid mis-clicks.
+    ordered = sorted(candidates, key=lambda item: item[0], reverse=(name.casefold() == "usage"))
+
+    for _y, element in ordered:
+        press_element(element)
+        time.sleep(0.8)
+        refreshed = _refresh_app_ref()
+        if name.casefold() == "usage":
+            if _is_usage_page_visible(refreshed):
+                return True
+            continue
+        return True
+    return False
 
 
 def _click_labeled(app: Any, label: str, *, prefer_roles: tuple[str, ...] | None = None) -> None:
@@ -205,13 +252,13 @@ def _navigate_to_usage(current: Any) -> Any:
         return current
 
     if _is_settings_panel_open(current):
-        if _click_usage_in_settings_sidebar(current):
+        if _click_settings_nav(current, "Usage"):
             time.sleep(0.8)
             current = _refresh_app_ref()
             if _is_usage_page_visible(current):
                 return current
 
-    if _click_usage_in_settings_sidebar(current):
+    if _click_settings_nav(current, "Usage"):
         time.sleep(0.8)
         current = _refresh_app_ref()
         if _is_usage_page_visible(current):
@@ -221,7 +268,7 @@ def _navigate_to_usage(current: Any) -> Any:
         if _click_labeled_in_sidebar(current, "Settings"):
             time.sleep(0.8)
             current = _refresh_app_ref()
-            if _click_usage_in_settings_sidebar(current):
+            if _click_settings_nav(current, "Usage"):
                 time.sleep(0.8)
                 current = _refresh_app_ref()
                 if _is_usage_page_visible(current):
@@ -230,7 +277,7 @@ def _navigate_to_usage(current: Any) -> Any:
     _open_settings_via_keyboard()
     current = _refresh_app_ref()
     if not _is_usage_page_visible(current):
-        _click_usage_in_settings_sidebar(current)
+        _click_settings_nav(current, "Usage")
         time.sleep(0.8)
         current = _refresh_app_ref()
     if _is_usage_page_visible(current):
@@ -239,7 +286,7 @@ def _navigate_to_usage(current: Any) -> Any:
     _open_settings_via_menu_bar()
     current = _refresh_app_ref()
     if not _is_usage_page_visible(current):
-        _click_usage_in_settings_sidebar(current)
+        _click_settings_nav(current, "Usage")
         time.sleep(0.8)
         current = _refresh_app_ref()
 
@@ -248,7 +295,7 @@ def _navigate_to_usage(current: Any) -> Any:
         current = _refresh_app_ref()
         _click_labeled(current, "Settings", prefer_roles=("AXMenuItem", "AXButton"))
         current = _refresh_app_ref()
-        _click_usage_in_settings_sidebar(current)
+        _click_settings_nav(current, "Usage")
         time.sleep(0.8)
         current = _refresh_app_ref()
 
