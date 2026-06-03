@@ -171,8 +171,18 @@ def get_app_ref_for_usage() -> Any:
     running = find_running_app(BUNDLE_ID)
     if running is None:
         raise RuntimeError("Claude is not running")
-    enable_manual_accessibility(running.processIdentifier())
-    time.sleep(0.5)
+    pid = running.processIdentifier()
+    enable_manual_accessibility(pid)
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        app = _refresh_app_ref()
+        try:
+            if app.windows():
+                return app
+        except Exception:
+            pass
+        enable_manual_accessibility(pid)
+        time.sleep(0.4)
     return _refresh_app_ref()
 
 
