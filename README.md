@@ -39,17 +39,16 @@ You should see elements with titles like `Code`, `Chat`, `Recents`, and optional
 Run immediately (for testing):
 
 ```bash
-claude-continue continue --now          # Code tab (default)
-claude-continue continue code --now
-claude-continue continue chat --now
+claude-continue code --now
+claude-continue chat --now
 ```
 
 Wait until a clock time, then run once:
 
 ```bash
-claude-continue continue --at "4:20pm"
-claude-continue continue code --at "7:30 am"
-claude-continue continue chat --at "16:20"
+claude-continue code --at "4:20pm"
+claude-continue chat --at "7:30 am"
+claude-continue chat --at "16:20"
 ```
 
 `--at` uses **minute precision** (seconds are ignored). Schedule at least one minute ahead of the current time.
@@ -57,16 +56,17 @@ claude-continue continue chat --at "16:20"
 If the time has already passed today, the tool waits until **the same time tomorrow**. Use `--today-only` to fail instead:
 
 ```bash
-claude-continue continue --at "4:20pm" --today-only
+claude-continue code --at "4:20pm" --today-only
 ```
 
 Debug the UI tree:
 
 ```bash
 claude-continue inspect --depth 8
+claude-continue inspect --sidebar
 ```
 
-## What it does (continue mode)
+## What it does
 
 1. Launch and focus Claude Desktop
 2. Switch to **Code** or **Chat** via the top nav pills (if you are on another tab)
