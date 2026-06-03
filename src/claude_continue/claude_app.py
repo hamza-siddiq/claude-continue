@@ -7,7 +7,6 @@ import time
 from typing import Any, Literal
 
 import atomacos
-from atomacos import keyboard as ax_keyboard
 
 from claude_continue.ax import (
     enable_manual_accessibility,
@@ -16,6 +15,7 @@ from claude_continue.ax import (
     press_element,
     retry,
 )
+from claude_continue.mac_focus import activate_claude
 
 BUNDLE_ID = "com.anthropic.claudefordesktop"
 APP_NAME = "Claude"
@@ -63,7 +63,7 @@ CHAT_ROW_ROLES = ("AXButton", "AXLink", "AXRow", "AXCell")
 def launch_if_needed() -> None:
     if find_running_app(BUNDLE_ID):
         return
-    subprocess.run(["open", "-a", APP_NAME], check=True)
+    subprocess.run(["open", "-gj", "-a", APP_NAME], check=True)
     for _ in range(30):
         if find_running_app(BUNDLE_ID):
             return
@@ -72,11 +72,8 @@ def launch_if_needed() -> None:
 
 
 def activate() -> None:
-    subprocess.run(
-        ["osascript", "-e", f'tell application "{APP_NAME}" to activate'],
-        check=True,
-    )
-    time.sleep(0.8)
+    activate_claude()
+    time.sleep(0.5)
 
 
 def _matches_label(element: Any, label: str) -> bool:
@@ -352,18 +349,15 @@ def click_first_recent_chat(app: Any, *, tab: SidebarTab) -> Any:
     return refreshed
 
 
-def _press_return() -> None:
-    """Submit via Return; AXValue + element sendKeys often skip Enter."""
-    ax_keyboard.press("return")
+def _press_return(composer: Any) -> None:
+    """Submit via Return on the composer (avoid pyautogui — it steals Dock focus)."""
+    activate_claude()
+    try:
+        composer.sendKeys("\r")
+    except Exception:
+        pass
     time.sleep(0.1)
-    subprocess.run(
-        [
-            "osascript",
-            "-e",
-            'tell application "System Events" to key code 36',  # Return
-        ],
-        check=False,
-    )
+    activate_claude()
 
 
 def find_code_composer(app: Any) -> Any | None:
@@ -424,7 +418,7 @@ def send_continue_message(app: Any, *, tab: SidebarTab) -> None:
 
         composer.sendKeys(MESSAGE_TEXT)
         time.sleep(0.2)
-        _press_return()
+        _press_return(composer)
 
     retry(_send, description="send continue message")
 

@@ -6,8 +6,6 @@ import subprocess
 import time
 from typing import Any
 
-from atomacos import keyboard as ax_keyboard
-
 from claude_continue.ax import (
     enable_manual_accessibility,
     find_running_app,
@@ -17,7 +15,6 @@ from claude_continue.ax import (
     show_menu,
 )
 from claude_continue.claude_app import (
-    APP_NAME,
     BUNDLE_ID,
     UI_READY_POLL_S,
     _element_label,
@@ -26,6 +23,7 @@ from claude_continue.claude_app import (
     _matches_label,
     _refresh_app_ref,
 )
+from claude_continue.mac_focus import activate_claude, keystroke_in_claude
 from claude_continue.usage_parse import UsageSnapshot
 
 # Bottom-left sidebar: profile / chevron (screen coords, not window-relative).
@@ -85,23 +83,18 @@ def _click_labeled_in_sidebar(app: Any, label: str) -> bool:
 
 
 def _open_settings_via_menu_bar() -> None:
-    subprocess.run(
-        [
-            "osascript",
-            "-e",
-            f'tell application "{APP_NAME}" to activate',
-            "-e",
-            'tell application "System Events" to tell process "Claude" to click '
-            'menu item "Settings…" of menu 1 of menu bar item "Claude" of menu bar 1',
-        ],
-        check=False,
+    keystroke_in_claude(
+        'tell application "System Events" to tell process "Claude" to click '
+        'menu item "Settings…" of menu 1 of menu bar item "Claude" of menu bar 1',
     )
-    time.sleep(1.0)
+    time.sleep(0.5)
 
 
 def _open_settings_via_keyboard() -> None:
-    ax_keyboard.hotkey("command", ",")
-    time.sleep(1.0)
+    keystroke_in_claude(
+        'tell application "System Events" to keystroke "," using command down',
+    )
+    time.sleep(0.5)
 
 
 def _find_profile_menu_control(app: Any) -> Any | None:

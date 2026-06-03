@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from claude_continue import __version__
+from claude_continue.mac_focus import suppress_python_dock_icon
 from claude_continue.claude_app import ContinueTarget
 from claude_continue.inspect_cmd import run_inspect
 from claude_continue.modes import continue_mode
@@ -43,6 +44,7 @@ def _make_run_parser(
 
 
 def main(argv: list[str] | None = None) -> int:
+    suppress_python_dock_icon()
     parser = argparse.ArgumentParser(
         prog="claude-continue",
         description=(
