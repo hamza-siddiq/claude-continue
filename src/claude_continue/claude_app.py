@@ -35,6 +35,13 @@ CODE_COMPOSER_DESCRIPTION = "Prompt"
 CHAT_COMPOSER_HINT = "write your prompt"
 
 SIDEBAR_MAX_X = 450
+# Top nav pill row (Chat / Cowork / Code) — used when df-pill is not exposed yet on cold start.
+SIDEBAR_PILL_Y_MIN = 150
+SIDEBAR_PILL_Y_MAX = 230
+SIDEBAR_PILL_X_MIN = 400
+
+UI_READY_TIMEOUT_S = 45
+UI_READY_POLL_S = 0.5
 
 # Section headers and nav; pinned chats above Recents are excluded via y > recents_y.
 SKIP_SIDEBAR_LABELS = frozenset(
@@ -70,20 +77,6 @@ def activate() -> None:
     time.sleep(0.8)
 
 
-def get_app_ref() -> Any:
-    launch_if_needed()
-    activate()
-    running = find_running_app(BUNDLE_ID)
-    if running is None:
-        raise RuntimeError("Claude is not running")
-    enable_manual_accessibility(running.processIdentifier())
-    time.sleep(0.3)
-    app = atomacos.getAppRefByBundleId(BUNDLE_ID)
-    if app is None:
-        raise RuntimeError("Could not get accessibility reference for Claude")
-    return app
-
-
 def _matches_label(element: Any, label: str) -> bool:
     label_lower = label.lower()
     for attr in ("AXTitle", "AXDescription", "AXValue", "AXIdentifier"):
@@ -114,6 +107,19 @@ def _element_x(element: Any) -> float:
         return 0.0
 
 
+def _refresh_app_ref() -> Any:
+    app = atomacos.getAppRefByBundleId(BUNDLE_ID)
+    if app is None:
+        raise RuntimeError("Could not get accessibility reference for Claude")
+    return app
+
+
+def _is_top_nav_pill_candidate(element: Any) -> bool:
+    y = _element_y(element)
+    x = _element_x(element)
+    return SIDEBAR_PILL_Y_MIN <= y <= SIDEBAR_PILL_Y_MAX and x >= SIDEBAR_PILL_X_MIN
+
+
 def find_sidebar_tab(app: Any, label: str) -> Any | None:
     """Top nav pill (Chat / Cowork / Code), not other 'Code' buttons in the UI."""
     for element in app.findAllR(AXRole="AXButton"):
@@ -121,7 +127,42 @@ def find_sidebar_tab(app: Any, label: str) -> Any | None:
             continue
         if _matches_label(element, label):
             return element
+    # Cold start: web view may expose labels before df-pill classes are present.
+    for element in app.findAllR(AXRole="AXButton"):
+        if not _matches_label(element, label):
+            continue
+        if _is_top_nav_pill_candidate(element):
+            return element
     return None
+
+
+def wait_for_sidebar_ready(app: Any) -> Any:
+    """Wait until Chat/Code nav pills exist (Electron UI after cold launch)."""
+    deadline = time.monotonic() + UI_READY_TIMEOUT_S
+    current = app
+    while time.monotonic() < deadline:
+        for name in (SIDEBAR_CHAT, SIDEBAR_COWORK, SIDEBAR_CODE):
+            if find_sidebar_tab(current, name) is not None:
+                time.sleep(0.4)
+                return _refresh_app_ref()
+        time.sleep(UI_READY_POLL_S)
+        current = _refresh_app_ref()
+    raise RuntimeError(
+        "Claude sidebar did not load in time. "
+        "Leave the main window open and try again."
+    )
+
+
+def get_app_ref() -> Any:
+    launch_if_needed()
+    activate()
+    running = find_running_app(BUNDLE_ID)
+    if running is None:
+        raise RuntimeError("Claude is not running")
+    enable_manual_accessibility(running.processIdentifier())
+    time.sleep(0.5)
+    app = _refresh_app_ref()
+    return wait_for_sidebar_ready(app)
 
 
 def is_sidebar_tab_active(tab: Any) -> bool:
@@ -129,9 +170,12 @@ def is_sidebar_tab_active(tab: Any) -> bool:
 
 
 def _find_recents_y(app: Any) -> float:
-    for element in app.findAllR(AXRole="AXButton"):
-        if _matches_label(element, SIDEBAR_RECENTS):
-            return _element_y(element)
+    deadline = time.monotonic() + UI_READY_TIMEOUT_S
+    while time.monotonic() < deadline:
+        for element in app.findAllR(AXRole="AXButton"):
+            if _matches_label(element, SIDEBAR_RECENTS):
+                return _element_y(element)
+        time.sleep(UI_READY_POLL_S)
     raise RuntimeError(f'"{SIDEBAR_RECENTS}" section not found in sidebar')
 
 
