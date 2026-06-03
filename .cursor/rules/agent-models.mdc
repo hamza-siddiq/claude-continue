@@ -1,0 +1,10 @@
+---
+description: Do not use composer-2.5-fast unless the user enabled it
+alwaysApply: true
+---
+
+# Agent and Task model selection
+
+- Do **not** pass `model: "composer-2.5-fast"` (or any fast variant) to the Task tool unless the user explicitly asked for that model or has fast mode turned on for this session.
+- When delegating to subagents, omit the `model` parameter so the default model is used.
+- Do not prefer speed over the user's model settings.
