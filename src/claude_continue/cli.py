@@ -19,17 +19,25 @@ def _add_schedule_args(parser: argparse.ArgumentParser) -> None:
         metavar="TIME",
         help='Override: run at clock time, e.g. "4:20pm" (default: read Usage page)',
     )
+    parser.add_argument(
+        "--allow-sleep",
+        action="store_true",
+        help=(
+            "Allow macOS idle sleep while waiting. If macOS refuses the wake "
+            "schedule, the run may wait until you wake the Mac."
+        ),
+    )
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    outcome = wait_until_run(manual_at=args.at)
+    outcome = wait_until_run(manual_at=args.at, allow_sleep=args.allow_sleep)
     if outcome == "cancelled":
         return 1
     return continue_mode.run_continue(target=args.target)
 
 
 def _cmd_run_enter(args: argparse.Namespace) -> int:
-    outcome = wait_until_run(manual_at=args.at)
+    outcome = wait_until_run(manual_at=args.at, allow_sleep=args.allow_sleep)
     if outcome == "cancelled":
         return 1
     return enter_mode.run_enter()

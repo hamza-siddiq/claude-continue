@@ -14,7 +14,9 @@ from claude_continue.power import (
     format_wait_duration,
     notify_resume_after_sleep,
     prevent_idle_sleep,
-    try_schedule_relative_wake,
+    start_idle_sleep_preventer,
+    stop_sleep_preventer,
+    try_schedule_wake_at,
 )
 
 _TIME_RE = re.compile(
@@ -80,48 +82,99 @@ def _wake_seconds_before_target(remaining: float) -> float:
     return max(WAKE_LEAD_SECONDS, remaining - CAFFEINATE_LEAD_SECONDS)
 
 
-def sleep_until(target: datetime) -> None:
+def _wake_at_before_target(target: datetime) -> datetime:
+    """Local clock time when macOS should wake before the target."""
+    return target - timedelta(seconds=CAFFEINATE_LEAD_SECONDS)
+
+
+def _start_sleep_preventer(remaining: float):
+    proc = start_idle_sleep_preventer(remaining)
+    if proc is None:
+        print(
+            "Could not start caffeinate; if the Mac sleeps, this run may wait "
+            "until you wake it.",
+            file=sys.stderr,
+        )
+        return None
+    print(
+        f"Keeping Mac awake for {format_wait_duration(remaining)} "
+        "(display may still sleep).",
+        file=sys.stderr,
+    )
+    return proc
+
+
+def sleep_until(target: datetime, *, allow_sleep: bool = False) -> None:
     """Block until `target`, allowing the Mac to sleep most of the wait.
 
-    Does not keep the Mac awake for the whole wait. When far from the target,
-    requests a one-time system wake via pmset (best-effort). In the last few
-    minutes, uses caffeinate so an awake Mac does not idle-sleep. After system
-    sleep, resumes when the process runs again; if the target passed during
-    sleep, returns immediately.
+    By default, keeps the system from idle-sleeping if macOS will not accept a
+    scheduled wake event. With allow_sleep=True, the Mac may sleep; if the wake
+    event cannot be registered, the process resumes only after something else
+    wakes the system.
     """
-    wake_requested = False
+    wake_attempted = False
+    wake_scheduled = False
+    sleep_preventer = None
+    completed = False
     last_tick = datetime.now()
 
-    while True:
-        now = datetime.now()
-        remaining = (target - now).total_seconds()
-        if remaining <= 0:
-            return
+    try:
+        while True:
+            now = datetime.now()
+            remaining = (target - now).total_seconds()
+            if remaining <= 0:
+                completed = True
+                return
 
-        tick_gap = (now - last_tick).total_seconds()
-        if tick_gap > 90:
-            notify_resume_after_sleep()
-            wake_requested = False
+            tick_gap = (now - last_tick).total_seconds()
+            if tick_gap > 90:
+                notify_resume_after_sleep()
 
-        if (
-            not wake_requested
-            and remaining >= MIN_WAKE_SCHEDULE_SECONDS
-        ):
-            wake_in = _wake_seconds_before_target(remaining)
-            if try_schedule_relative_wake(wake_in):
-                print(
-                    f"Scheduled system wake in {format_wait_duration(wake_in)} "
-                    f"(Mac may sleep until then).",
-                    file=sys.stderr,
-                )
-                wake_requested = True
+            if not wake_attempted and remaining >= MIN_WAKE_SCHEDULE_SECONDS:
+                wake_attempted = True
+                wake_at = _wake_at_before_target(target)
+                wake_in = max(WAKE_LEAD_SECONDS, (wake_at - now).total_seconds())
+                if try_schedule_wake_at(wake_at):
+                    print(
+                        f"Scheduled system wake for "
+                        f"{wake_at.strftime('%Y-%m-%d %I:%M %p')} "
+                        f"({format_wait_duration(wake_in)} from now).",
+                        file=sys.stderr,
+                    )
+                    wake_scheduled = True
+                elif allow_sleep:
+                    print(
+                        "Could not schedule a system wake; if the Mac sleeps, "
+                        "this run may wait until you wake it.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "Could not schedule a system wake; falling back to "
+                        "caffeinate.",
+                        file=sys.stderr,
+                    )
+                    sleep_preventer = _start_sleep_preventer(remaining)
 
-        if remaining <= CAFFEINATE_LEAD_SECONDS:
-            prevent_idle_sleep(remaining)
-            while (target - datetime.now()).total_seconds() > 0:
-                time.sleep(0.25)
-            return
+            if (
+                not allow_sleep
+                and not wake_scheduled
+                and sleep_preventer is None
+                and remaining < MIN_WAKE_SCHEDULE_SECONDS
+            ):
+                sleep_preventer = _start_sleep_preventer(remaining)
 
-        last_tick = now
-        chunk = min(remaining - CAFFEINATE_LEAD_SECONDS, 60)
-        time.sleep(max(chunk, 0.25))
+            if remaining <= CAFFEINATE_LEAD_SECONDS:
+                if sleep_preventer is None:
+                    prevent_idle_sleep(remaining)
+                while (target - datetime.now()).total_seconds() > 0:
+                    time.sleep(0.25)
+                completed = True
+                return
+
+            last_tick = now
+            chunk = min(remaining - CAFFEINATE_LEAD_SECONDS, 60)
+            time.sleep(max(chunk, 0.25))
+    finally:
+        if not completed:
+            stop_sleep_preventer(sleep_preventer)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import subprocess
 import sys
 
@@ -11,10 +12,59 @@ WAKE_LEAD_SECONDS = 120
 MIN_WAKE_SCHEDULE_SECONDS = 300
 # Prevent idle sleep in the final window so a running Mac does not doze off.
 CAFFEINATE_LEAD_SECONDS = 180
+WAKE_EVENT_OWNER = "claude-continue"
+
+
+def _pmset_datetime(value: datetime) -> str:
+    return value.strftime("%m/%d/%y %H:%M:%S")
+
+
+def try_schedule_wake_at(when: datetime) -> bool:
+    """Ask macOS to wake at an absolute local time (best-effort)."""
+    proc = subprocess.run(
+        [
+            "pmset",
+            "schedule",
+            "wakeorpoweron",
+            _pmset_datetime(when),
+            WAKE_EVENT_OWNER,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0
+
+
+def start_idle_sleep_preventer(seconds: float) -> subprocess.Popen | None:
+    """Start a bounded caffeinate process that prevents idle system sleep."""
+    secs = max(1, int(seconds) + 15)
+    try:
+        return subprocess.Popen(
+            ["caffeinate", "-i", "-t", str(secs)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+
+
+def stop_sleep_preventer(proc: subprocess.Popen | None) -> None:
+    """Stop a caffeinate process started by start_idle_sleep_preventer."""
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def try_schedule_relative_wake(seconds: float) -> bool:
-    """Ask macOS to wake in `seconds` from now (best-effort, no admin)."""
+    """Ask macOS for an imprecise relative wake event.
+
+    This is retained for compatibility, but the scheduler uses absolute
+    wake events because relative wakes are measured from the end of sleep.
+    """
     secs = int(seconds)
     if secs < 60 or secs > 7 * 24 * 3600:
         return False
@@ -28,8 +78,7 @@ def try_schedule_relative_wake(seconds: float) -> bool:
 
 def prevent_idle_sleep(seconds: float) -> None:
     """Keep the system awake for `seconds` using caffeinate (no admin)."""
-    secs = max(1, int(seconds) + 15)
-    subprocess.run(["caffeinate", "-i", "-t", str(secs)], check=False)
+    start_idle_sleep_preventer(seconds)
 
 
 def format_wait_duration(seconds: float) -> str:

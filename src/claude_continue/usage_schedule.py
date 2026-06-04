@@ -70,7 +70,9 @@ def resolve_run_time_from_usage(*, manual_at: str | None = None) -> datetime | S
         print("Closed Settings.")
 
 
-def wait_until_run(*, manual_at: str | None = None) -> ScheduleOutcome:
+def wait_until_run(
+    *, manual_at: str | None = None, allow_sleep: bool = False
+) -> ScheduleOutcome:
     """Block until the resolved run time; return whether to proceed."""
     outcome = resolve_run_time_from_usage(manual_at=manual_at)
     if outcome == "cancelled":
@@ -78,6 +80,6 @@ def wait_until_run(*, manual_at: str | None = None) -> ScheduleOutcome:
         return "cancelled"
     if outcome == "run_now":
         return "run_now"
-    sleep_until(outcome)
+    sleep_until(outcome, allow_sleep=allow_sleep)
     print("Scheduled time reached.")
     return "run_now"
