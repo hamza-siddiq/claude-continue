@@ -55,7 +55,7 @@ flowchart LR
 ```
 
 1. **Schedule** — From the Usage page (or `--at`), decide when to run.
-2. **Wait** — Sleep in short chunks; the Mac may sleep; energy-friendly wake hints when far away.
+2. **Wait** — Try to schedule a system wake; if macOS refuses, prevent idle sleep with `caffeinate`.
 3. **Run** — `code` / `chat`: focus Claude, switch tab, open the first chat below **Recents** (skip **Pinned**), send `continue`. `enter`: focus Claude, click the in-view prompt that **already has text**, press **Enter** only (no tab switch, no Recents, no typing).
 
 Claude can be closed during the wait. The tool launches and focuses it at run time.
@@ -117,6 +117,7 @@ Without Accessibility, the tool cannot read the UI or send keystrokes.
 | Flag | Commands | Description |
 |------|----------|-------------|
 | `--at TIME` | `code`, `chat`, `enter` | Skip Usage; run at a clock time, e.g. `"4:20pm"`, `"7:30 am"`, `"16:20"` |
+| `--allow-sleep` | `code`, `chat`, `enter` | Allow idle sleep while waiting; if macOS refuses the wake schedule, the run may wait until you wake the Mac |
 | `--version` | all | Print version and exit |
 
 `--at` uses **minute precision**. If that time already passed today, the tool waits until the same time **tomorrow**.
@@ -134,6 +135,9 @@ claude-continue chat
 claude-continue code --at "12:00pm"
 claude-continue chat --at "7:30 am"
 
+# Prefer battery-saving sleep even if wake scheduling is unavailable
+claude-continue code --allow-sleep
+
 # Submit a draft you already typed (leave the right session open)
 claude-continue enter --at "12:00pm"
 
@@ -150,9 +154,16 @@ Usage: all_models=100%, session=ok
   All models reset: Resets Wed 12:00 PM
 Scheduled for 2026-06-04 12:00 PM
 Closed Settings.
-Scheduled system wake in 2 hr 58 min (Mac may sleep until then).
+Could not schedule a system wake; falling back to caffeinate.
+Keeping Mac awake for 2 hr 58 min (display may still sleep).
 Scheduled time reached.
 Continue attempt 1/3...
+```
+
+If you run with privileges that allow `pmset schedule`, you may instead see:
+
+```text
+Scheduled system wake for 2026-06-04 11:57 AM (2 hr 55 min from now).
 ```
 
 If usage is **not** at 100%, the tool asks:
@@ -198,17 +209,28 @@ At run time the tool finds the bottom-most in-window text field with non-empty c
 
 ## Sleep and power
 
-The tool **does not** keep your Mac awake for the entire wait.
+The tool prioritizes making the scheduled run happen. A sleeping Mac pauses
+user processes, so the CLI cannot run again until macOS wakes the machine.
+
+By default, `claude-continue` first tries to schedule a real wake event with
+`pmset schedule wakeorpoweron`. On many Macs this requires root, so if macOS
+refuses the wake schedule, the tool falls back to `caffeinate -i` for the wait.
+That prevents idle system sleep; the display may still sleep.
 
 | Phase | Behavior |
 |-------|----------|
-| **Long wait** (30+ min away) | Best-effort `pmset relative wake` so the Mac can sleep and wake shortly before the run |
-| **Last ~3 minutes** | `caffeinate` so an **already-awake** Mac does not idle-sleep and miss the minute |
+| **Long wait** (5+ min away) | Try `pmset schedule wakeorpoweron` for a wake shortly before the run |
+| **Wake unavailable** | Fall back to `caffeinate -i` so the Mac does not idle-sleep before the run |
+| **Last ~3 minutes** | Ensure `caffeinate` is active so an awake Mac does not idle-sleep and miss the minute |
 | **After system sleep** | When the Mac wakes, the CLI resumes; if the scheduled time already passed, it runs immediately |
 
 **Claude does not need to stay open** while waiting. After reading Usage, Settings is closed; at run time Claude is launched in the **foreground** for reliable automation.
 
-**Keep the terminal session alive** — if your shell or laptop policy kills background jobs on sleep, use `nohup` or leave the lid open / plugged in for critical resets. Lid-closed sleep on battery may skip a scheduled wake.
+Use `--allow-sleep` to permit idle sleep and rely only on the best-effort wake
+schedule. If wake scheduling is unavailable, the run may not happen until you
+wake the Mac yourself.
+
+**Keep the terminal session alive** — if your shell or laptop policy kills background jobs on sleep, use `nohup` or leave the lid open / plugged in for critical resets. Lid-closed sleep on battery may skip a scheduled wake, and `caffeinate` cannot override a manual sleep or closed-lid sleep.
 
 ---
 
@@ -251,7 +273,7 @@ Use these when Anthropic ships a UI change and selectors stop matching.
 | **Claude not found** | Install Claude Desktop; confirm `/Applications/Claude.app` exists |
 | **No chats under Recents** | Open the Code or Chat tab manually once so Recents is populated |
 | **Wrong tab or chat** | Run `claude-continue inspect --sidebar`; check English UI labels |
-| **Missed reset after sleep** | Ensure the CLI process is still running; prefer plugged-in / lid open; check logs if using `nohup` |
+| **Missed reset after sleep** | Avoid `--allow-sleep`; keep the lid open; ensure the CLI process is still running; check logs if using `nohup` |
 | **Nothing happens until I click Claude** | Update to latest build (foreground launch at continue time); grant Automation permission for Claude |
 | **`enter`: no prompt with text** | Open the target session and type your draft before the scheduled time; the prompt must have visible non-empty text |
 
